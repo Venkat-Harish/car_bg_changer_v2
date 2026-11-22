@@ -180,6 +180,52 @@ So in flat mode the [`background_scaler`](background_scaler) folder shrinks the 
 - `background_min_width` (default 640 px) stops a background shrinking further.
 - In room mode this only applies to a background without a 3D room.
 
+## Hosted models on fal.ai: `[hosted]` (on by default)
+
+The shipped `config.toml` runs set-up B of [`docs/glass-cutout-camera-options.md`](docs/glass-cutout-camera-options.md):
+open models hosted on [fal.ai](https://fal.ai), with nothing generated.
+
+| Step | Model | About |
+|---|---|---|
+| Cut-out edge | BiRefNet v2 (fal) | $0.002 per photo |
+| Keep only this car (drop neighbouring cars, people) | SAM 3, prompt "car" | $0.005 |
+| Glass | SAM 3, prompts "car window" and "windshield", then a fixed dark tint | $0.01 |
+| Camera per photo (focal length, floor, height, pitch, roll) | MoGe-3 | $0.015-0.03 |
+| All photos of the car solved together (shared lens, angle between shots) | VGGT-1B | $0.001 |
+
+That comes to about **$0.04 per photo, $1.50 for a 36-photo car**. Results are cached in `output\_hosted_cache\`,
+so running the same photos again is free. `max_cost_per_car` (default $3) stops the calls for a folder once its
+estimate is reached; the rest of the folder then uses the laptop path. Any step that fails on fal does the same
+for that photo and is flagged in results.csv: `hosted-cutout-failed`, `sam3-failed`, `glass-mask-failed`,
+`moge-failed` or `camera-lines-fallback`.
+
+**The key.** Put `FAL_KEY=<your key>` in `background_changer\.env` (gitignored; see `.env.example`), or set the
+`FAL_KEY` environment variable. Without a key, `[hosted] enabled = true` stops with a message. `--no-hosted` runs
+the old laptop-only path.
+
+**Glass.** Every window, the windscreen included, gets the same clean dark gradient, keeping a faint trace of the
+original glass (`tint_keep`). The rule is the same for every photo, so a 360° spin doesn't flicker. This is the
+only change ever made to the car's own pixels, and it stays inside the window mask. The untouched photos are always
+copied to `output\<folder>\originals\`, so a cracked windscreen can still be checked there. `glass_tint = false`
+leaves the glass as shot.
+
+**Camera.** In room mode, VGGT's lens and MoGe-3's floor replace the background lines as the main source of the
+camera; the lines remain the fallback. The view labels anchor VGGT's angles between shots, and the result gives the
+3D fit its starting view angle. A photo whose own clear background lines disagree with the hosted pitch or roll by
+more than 5° keeps the lines (flag `camera-lines-fallback`).
+
+Extra results.csv columns when `[hosted]` is on:
+
+| Column | Meaning |
+|---|---|
+| `hosted` | `fal`, or `local` when fal's cut-out failed |
+| `sam3_status` | SAM 3's pick of this car: `ok`, `unsure`, `no-vehicle` (`unsure`/`no-vehicle`: the plain cut-out was used) |
+| `glass_pct` | share of the car's area that is glass (tinted), % |
+| `camera_source` | `hosted`, `lines`, `neighbours` or `silhouette`: where the roll and pitch came from |
+| `moge_f`, `moge_h` | MoGe-3's focal length (px) and camera height above the floor (m) |
+| `vggt_ok` | whether VGGT solved this photo |
+| `cost_usd` | this photo's estimated fal spend (0 when cached) |
+
 ## Keeping only the car: `car_isolation`
 
 The cut-out model marks "the salient object", not "this car". Whatever touches the car in the photo can come along: a car parked behind it (seen past the mirror or above the roof), a person, a gate. It also fills every gap inside the outline, so the old background seen between the mirror and the door stays in. `car_isolation` (its own folder, off by default) fixes that:

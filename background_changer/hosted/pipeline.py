@@ -153,3 +153,107 @@ class HostedRun:
     def flags(self, stem: str) -> list[str]:
         info = self.info.get(stem)
         return list(info.flags) if info else []
+
+    # ------------------------------------------------------------------ between stages 1 and 2
+    def camera(self, photos: list, read_frame, frame_alpha) -> dict[str, dict]:
+        """MoGe-3 per photo + one VGGT call for the folder -> photo.measured.external (HostedCamera).
+        read_frame(path) -> BGR, frame_alpha(photo) -> (full-frame alpha, crop xy). Returns view-prior probs
+        {stem: probs} from VGGT's relative yaws anchored on the photos' view labels (empty when not possible).
+        Fills the camera columns of photo.hosted in place."""
+        from .camera import combine, moge_frame, vggt_car
+
+        if not photos or not self.s["camera"]:
+            return {}
+        moge, small, small_masks, scales, sizes, keep = [], [], [], [], [], []
+        print(f"hosted camera: MoGe-3 on {len(photos)} photo(s)"
+              + (" + one VGGT solve over all of them" if self.s["vggt"] else ""), flush=True)
+        for photo in photos:
+            stem = photo.path.stem
+            info = self.info.setdefault(stem, HostedInfo())
+            try:
+                frame = read_frame(photo.frame_path or photo.path)
+            except OSError:
+                frame = None
+            if frame is None:
+                moge.append(None)
+                continue
+            alpha, _ = frame_alpha(photo)
+            mask = alpha >= 0.5
+            spent0 = self.client.spend.usd
+            try:
+                fc = moge_frame(self.client, frame, mask)
+            except FalError as exc:
+                fc = None
+                info.flags.append("moge-failed")
+                print(f"  {photo.path.name}: MoGe-3 failed ({exc})", flush=True)
+            info.cost_usd += self.client.spend.usd - spent0
+            moge.append(fc)
+            if fc is not None:
+                info.moge_f = round(fc.f_px, 1) if fc.f_px else ""
+                info.moge_h = round(fc.height_m, 3) if fc.height_m else ""
+            H, W = frame.shape[:2]
+            s = min(1.0, 1036 / max(H, W))  # VGGT works at 518 px: keep small copies, not the full frames
+            if s < 1:
+                frame = cv2.resize(frame, (round(W * s), round(H * s)), interpolation=cv2.INTER_AREA)
+                mask = cv2.resize(mask.astype(np.uint8), (frame.shape[1], frame.shape[0]),
+                                  interpolation=cv2.INTER_NEAREST).astype(bool)
+            small.append(frame)
+            small_masks.append(mask)
+            scales.append(frame.shape[1] / W)
+            keep.append(len(moge) - 1)
+            del alpha
+        sizes = [p.measured.size for p in photos]
+        vggt = None
+        if self.s["vggt"] and len(small) >= 2:
+            spent0 = self.client.spend.usd
+            try:
+                got = vggt_car(self.client, small, small_masks)
+                vggt = [None] * len(photos)
+                for idx, fc, s in zip(keep, got, scales):
+                    if fc is not None and fc.f_px:
+                        fc.f_px = fc.f_px / s  # focal back to the photo's full size
+                    vggt[idx] = fc
+            except FalError as exc:
+                print(f"  VGGT failed ({exc}); MoGe-3 alone", flush=True)
+            share = (self.client.spend.usd - spent0) / max(1, len(keep))
+            for idx in keep:
+                self.info[photos[idx].path.stem].cost_usd += share
+        del small, small_masks
+        cams = combine(moge, vggt, sizes)
+        for photo, cam, v in zip(photos, cams, vggt or [None] * len(photos)):
+            info = self.info[photo.path.stem]
+            info.vggt_ok = "" if not self.s["vggt"] else ("yes" if v is not None else "no")
+            photo.measured.external = cam
+            if photo.hosted is not None:
+                photo.hosted.update(info.cols())
+        return self._yaw_probs(photos, cams)
+
+    @staticmethod
+    def _yaw_probs(photos: list, cams: list) -> dict[str, dict]:
+        """VGGT's relative yaws, anchored on the view labels (circular median over all labelled photos, so one
+        wrong label does not matter), as a peaked view prior per photo. Needs 3+ photos with both."""
+        from bg_changer.probe import parse_name
+        from bg_changer.yaw import BIN_DEG
+
+        from .camera import anchor_yaws, yaw_probs
+
+        rel = [c.rel_yaw_deg if c is not None else None for c in cams]
+        labels = []
+        for p in photos:
+            info = parse_name(p.path.stem)
+            labels.append(BIN_DEG.get(info.label) if info and info.label in BIN_DEG else None)
+        if sum(r is not None and lab is not None for r, lab in zip(rel, labels)) < 3:
+            return {}
+        offset = anchor_yaws(rel, labels)
+        if offset is None:
+            return {}
+        return {p.path.stem: yaw_probs((offset + r) % 360.0, sigma=20.0) for p, r in zip(photos, rel) if r is not None}
+
+    def apply_focals(self, items: list, config_focal: float | None) -> None:
+        """After choose_focals: the hosted focal wins over the lines (not over a [fit] focal from the config)."""
+        if config_focal:
+            return
+        for m in items:
+            ext = getattr(m, "external", None)
+            if ext is not None and ext.f_px:
+                m.focal, m.focal_source = float(ext.f_px), "hosted"

@@ -476,10 +476,13 @@ def _local_maxima(C: np.ndarray) -> list[int]:
 def fit_pose(alpha: np.ndarray, cut, shape: CarShape, f: float, body: str, probs: dict | None = None,
              cue: RedCue | None = None, line_roll: float | None = None, line_pitch: float | None = None,
              strong_lines: bool = True, h_prior: tuple[float, float] | None = None, label: str | None = None,
-             max_seconds: float = 120.0, alt_body: str | None = None) -> PoseFit:
+             max_seconds: float = 120.0, alt_body: str | None = None,
+             strong_h_prior: tuple[float, float] | None = None) -> PoseFit:
     """Fit the car's pose to its full-frame alpha (H x W) at focal f (frame px). probs: classifier (or
     label) probabilities by view bin; cue: red tail lamps; line roll/pitch: priors from background lines
-    (strong_lines False -> h_prior is used and roll is left to the silhouette)."""
+    (strong_lines False -> h_prior is used and roll is left to the silhouette). strong_h_prior: a measured
+    camera height (h, sigma), e.g. a hosted floor fit, applied with strong lines too (h_prior is not: the
+    folder prior is meant for weak-line photos); None keeps the strong-line priors as they were."""
     t0 = time.perf_counter()
     cut = frozenset(cut)
     cue = cue or RedCue()
@@ -493,6 +496,8 @@ def fit_pose(alpha: np.ndarray, cut, shape: CarShape, f: float, body: str, probs
     # every candidate is judged by the same energy.
     if strong_lines and line_roll is not None:
         prior_kw = dict(pitch=line_pitch, sp=3.0, rollp=(line_roll, 3.0), hlim=H_LIMITS_STRONG)
+        if strong_h_prior is not None:
+            prior_kw["hprior"] = strong_h_prior
     else:
         prior_kw = dict(hprior=h_prior or H_DEFAULT_PRIOR)
 

@@ -66,6 +66,7 @@ video_pipeline/make_video.py: video ─► frames 00001.jpg ─► mask_plates.p
   - [car_fit_to_bg/](background_changer/car_fit_to_bg/CLAUDE.md) — camera from background lines, 3D pose fit, levelling, room placement
   - [room3d/](background_changer/room3d/CLAUDE.md) — 3D room model and NumPy/OpenCV re-render from a new camera
   - [car_isolation/](background_changer/car_isolation/CLAUDE.md) — optional YOLOX-s + SAM pass that keeps only the target car in the mask
+  - [hosted/](background_changer/hosted/CLAUDE.md) — `[hosted]` (on by default): fal.ai BiRefNet + SAM 3 cut-out, glass tint, MoGe-3 + VGGT camera; needs `FAL_KEY`
   - [background_scaler/](background_changer/background_scaler/CLAUDE.md) — shrinks background + scene for small photos (flat placement)
   - [tests/](background_changer/tests/CLAUDE.md) — model-free pytest suite, bit-exact car-pixel checks
 - [number_plate_detection/](number_plate_detection/CLAUDE.md) — entry point `mask_plates.py`, config, assets
@@ -83,6 +84,9 @@ video_pipeline/make_video.py: video ─► frames 00001.jpg ─► mask_plates.p
    downscale it once with `INTER_AREA` (never enlarge) and crop it at a cut edge. No relighting, colour matching,
    sharpening or generated content; shadows, reflections and rooms go on the background and the car is pasted
    last. Bit-exact tests enforce this. Ask the user before any change that would touch car pixels otherwise.
+   **One approved exception (Nov 2026):** with `[hosted] glass_tint` on, every window (windscreen included) gets a
+   fixed dark tint, only inside SAM 3's window mask; the untouched photo is copied to `<out>/originals/`, and the
+   tinted frame then counts as the photo for every rule above ([hosted/](background_changer/hosted/CLAUDE.md)).
    video_pipeline may then resize a whole finished frame once (`fit_to_canvas`).
 2. **Bit-identical paths.** Flat mode must reproduce the pinned baseline (`output/_baseline_flat`,
    `tests/baseline_flat.toml`, `tools/check_flat.py`). `[car_isolation] enabled = false` must give exactly the

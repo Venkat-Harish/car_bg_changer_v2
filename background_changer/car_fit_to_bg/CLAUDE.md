@@ -85,6 +85,11 @@ Room mode, the default (`background_view = "room"`). Per photo, independent of t
 - Inputs from [bg_changer](../bg_changer/CLAUDE.md): `carmodel.CarShape`/`CarTable`, `grounding` (footprint, outline and contact layers, reflection), `compose.paste`, `probe` (`parse_name`, `LABELS`), `yaw.BIN_DEG`, `segment.fill_holes`, and the scene specs and plate cameras from [bg_changer/scenes](../bg_changer/scenes/CLAUDE.md).
 
 ## Invariants & gotchas
+- **Hosted camera hook** (`[hosted]`, see [../hosted/CLAUDE.md](../hosted/CLAUDE.md)): `Measured.external` (a
+  `hosted.camera.HostedCamera`, default None) is turned into a strong `LineCamera(source="hosted")` by
+  `batch._with_external`, unless the photo's own strong lines disagree by > 5 deg (lines kept, flag
+  `camera-lines-fallback`). Its height reaches `fit_pose` as `strong_h_prior=(h, 0.15)`, a separate argument so
+  that the folder `h_prior` keeps being ignored on strong photos exactly as before. With `external` None nothing changes.
 - **Car pixels (hard rule).** The car gets exactly one rigid rotation (`level_car`), one INTER_AREA downscale (`downscale`, never up: `s <= 1` in place, and `s >= 1` returns the pixels unchanged) and a crop at a cut edge.
   - Colour: `Lanczos4(a*c)/Lanczos4(a)`, set to 0 where the denominator is under 1/255, clamped to the 3×3 min/max of the source car pixels.
   - Alpha: bilinear, with values above 1-1e-4 set to 1.

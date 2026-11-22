@@ -28,6 +28,9 @@ Subpackages (own docs; internals not repeated here):
 - [car_fit_to_bg/](car_fit_to_bg/CLAUDE.md): line camera, focal pooling, 3D pose fit, levelling, `place_in_room`, `rooms.room_for`
 - [room3d/](room3d/CLAUDE.md): 3D room model and re-render from a new camera
 - [car_isolation/](car_isolation/CLAUDE.md): optional YOLOX-s + SAM pass that keeps only the target car in the mask
+- [hosted/](hosted/CLAUDE.md): `[hosted]` (on in the shipped config): fal.ai BiRefNet + SAM 3 cut-out, glass tint,
+  MoGe-3 + VGGT camera; `HostedRun` is created in `main()` after the output guard, replaces the local segmenter,
+  and is passed to stages 2-3 as `RoomRun.hosted`. `[hosted]` on turns `[car_isolation]` off for the run
 - [background_scaler/](background_scaler/CLAUDE.md): shrink background + scene for small photos (flat placement only)
 - [tests/](tests/CLAUDE.md): model-free pytest suite
 
@@ -35,7 +38,8 @@ Subpackages (own docs; internals not repeated here):
 Run from `background_changer\` (PowerShell): `.venv\Scripts\python change_background.py [images] [flags]`. Flags
 override config for one run: `--background NAME` (repeatable, or `all`), `--backgrounds-folder`, `--out`, `--car`,
 `--cut-frames frame|skip|anchor|centre`, `--background-view room|flat`, `--max-output-size PX`, `--model`,
-`--threads`, `--shadow`, `--quality`, `--background-scale folder|photo|off`, `--isolate/--no-isolate`, `--debug`
+`--threads`, `--shadow`, `--quality`, `--background-scale folder|photo|off`, `--isolate/--no-isolate`,
+`--hosted/--no-hosted`, `--debug`
 (on only), `--config FILE`. No flag for `cars_file`, `edge_shrink`, `save_cutouts`, `keep_background_sharp`,
 `background_min_width`, `[fit]`, `[scene]`, `min_score`, `remove_objects`.
 
@@ -62,7 +66,8 @@ override config for one run: `--background NAME` (repeatable, or `all`), `--back
    `fit_measured(..., video=True)` (+ `fit_pictures`), then per background `place_in_room` (+ `room_pictures`), or
    queue for `place_flat_fallback` when `room_for` gives no room; those are placed after all fits.
 8. `finally` (also on error/Ctrl+C): room mode adds a "not placed" row per waiting photo, sorts rows (`file_order`),
-   writes `results.csv` with `ROOM_CSV_FIELDS` or `CSV_FIELDS`, plus `ISOLATION_CSV_FIELDS` when isolation is on.
+   writes `results.csv` with `ROOM_CSV_FIELDS` or `CSV_FIELDS`, plus `ISOLATION_CSV_FIELDS` when isolation is on and
+   `HOSTED_CSV_FIELDS` when `[hosted]` is on (filled from `Photo.hosted` in `base_row` / the flat row).
 
 Outputs: `<out>/<bg>/<photo>.webp`, `cutouts/<photo>.webp`, `results.csv`; debug: `debug/README.txt`,
 `debug/<photo>/01..11`, `debug/<photo>/<bg>/12..16`; flat mode keeps its overlay at `<bg>/debug/<photo>.jpg`.
@@ -84,7 +89,8 @@ Downstream: `video_pipeline/make_video.py` runs this script with `<images> --out
 
 ## Invariants & gotchas
 - **Car pixels**: at most one rigid rotation (room levelling) + one `INTER_AREA` downscale (never enlarged) + crop at
-  a cut edge; car pasted last; damage stays visible. This file never edits `photo.image`; ask the user before
+  a cut edge; car pasted last; damage stays visible. Exception: `[hosted] glass_tint` tints the glass inside the
+  window mask in stage 1; from then on the tinted frame (`Photo.frame_path`, re-read by stage 3) is the photo. This file never edits `photo.image`; ask the user before
   anything else touches car pixels. Checked by tests and `check_room.py`.
 - **Flat mode is bit-identical** to `output/_baseline_flat`. Re-check per folder with `--config
   tests\baseline_flat.toml <images folder> --car "<carModel>" --out output\_flat_check`, then `check_flat.py`.
@@ -115,7 +121,7 @@ Downstream: `video_pipeline/make_video.py` runs this script with `<images> --out
 - Import guard: every top-level import sits in `try`; `ImportError` exits with `VENV_HINT` (started with the system
   Python instead of `.venv\Scripts\python`).
 - `threads = 0` means ORT auto for BiRefNet but 4 for the isolation models (`threads or 4`).
-- Tests pin shipped values: `test_config.py` (room, `cut_frames = "frame"`, 1920, keep sharp, `[fit]` auto/place,
+- Tests pin shipped values: `test_config.py` (`[hosted]` = defaults with `enabled = true`, baseline toml off; room, `cut_frames = "frame"`, 1920, keep sharp, `[fit]` auto/place,
   backgrounds 1-3 present, Baleno in cars.json) and `test_car_isolation.py` (isolation off). Changing `config.toml`
   defaults means updating them.
 - `[scene.<name>]` matching no background only warns. The view prior is keyed by images folder *name*.

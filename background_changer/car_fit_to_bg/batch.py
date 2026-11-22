@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -24,6 +25,13 @@ from . import PhotoFit, fit_photo
 from .lines import (LineCamera, choose_focal, exif_focal_px, line_camera, neighbour_roll_pitch, pool_focals,
                     video_time)
 from .pose import probs_from_label, read_view_results
+
+if TYPE_CHECKING:  # hosted is only imported when [hosted] is on; fit_measured reads the fields by name
+    from hosted.camera import HostedCamera
+
+HOSTED_CONF = 0.8  # LineCamera.conf of a hosted camera (strong: it levels the car like strong lines)
+HOSTED_DISAGREE_DEG = 5.0  # strong lines that differ by more than this in pitch or roll win over the hosted camera
+HOSTED_H_SIGMA = 0.15  # m: camera-height prior from the hosted floor fit
 
 
 @dataclass
@@ -37,6 +45,7 @@ class Measured:
     focal: float = 0.0
     focal_source: str = ""
     flags: list[str] = field(default_factory=list)
+    external: HostedCamera | None = None  # hosted camera (MoGe floor / VGGT); None = the line camera alone
 
 
 def measure(path: Path, frame: np.ndarray, alpha: np.ndarray) -> Measured:
@@ -78,6 +87,9 @@ def fit_measured(m: Measured, frame: np.ndarray, alpha: np.ndarray, cut, shape: 
         cam = line_camera(frame, alpha, f_full=m.focal)
     except Exception:  # noqa: BLE001 - no usable lines (stage 1 may have failed the same way): fit without them
         cam = LineCamera(source="none", flags=["lines-error"])
+    strong_h = None
+    if m.external is not None:
+        cam, h_prior, strong_h = _with_external(cam, m.external, m.focal, h_prior)
     if cam.roll is None or cam.conf < 0.3:
         nb = None
         if video and m.time_s is not None:
@@ -87,14 +99,43 @@ def fit_measured(m: Measured, frame: np.ndarray, alpha: np.ndarray, cut, shape: 
             cam = LineCamera(roll=nb[0], pitch=nb[1], f=m.focal, conf=0.5, conf_f=0.0, source="neighbours",
                              flags=["roll-from-neighbours"])
     probs, label = view_hints(m.stem, view_rows)
+    extra = {} if strong_h is None else {"strong_h_prior": strong_h}
     fit = fit_photo(frame, alpha, cut, shape, m.focal, m.focal_source, cam, probs=probs, label=label,
-                    h_prior=h_prior, max_seconds=max_seconds, stem=m.stem)
+                    h_prior=h_prior, max_seconds=max_seconds, stem=m.stem, **extra)
     if probs is None and label is None:  # no classifier row and no label in the file name: the outline alone
         fit.flags.append("no-view-label")
     for fl in m.flags:
         if fl not in fit.flags:
             fit.flags.append(fl)
     return fit
+
+
+def _with_external(cam: LineCamera, ext, focal: float, h_prior):
+    """(camera, h_prior, strong_h_prior) once a hosted camera is known. Its roll/pitch (moved to the chosen focal
+    like _at_focal) replace the lines unless the lines are strong and disagree by more than HOSTED_DISAGREE_DEG
+    (then the lines stay, flag camera-lines-fallback, and the hosted height is not used either). Its height
+    becomes the camera-height prior, for strong and weak lines alike."""
+    use_height = True
+    if ext.pitch is not None and ext.roll is not None:
+        hosted = _at_focal(LineCamera(roll=float(ext.roll), pitch=float(ext.pitch), f=ext.f_px or focal), focal)
+        lines_win = False
+        if cam.strong and cam.source == "lines":
+            d_roll = abs((cam.roll - hosted.roll + 180.0) % 360.0 - 180.0)
+            d_pitch = abs(cam.pitch - hosted.pitch) if cam.pitch is not None else 0.0
+            lines_win = max(d_roll, d_pitch) > HOSTED_DISAGREE_DEG
+        if lines_win:
+            cam = LineCamera(roll=cam.roll, pitch=cam.pitch, f=cam.f, conf=cam.conf, conf_f=cam.conf_f,
+                             sd_logf=cam.sd_logf, n_vert=cam.n_vert, source=cam.source,
+                             flags=list(cam.flags) + ["camera-lines-fallback"])
+            use_height = False
+        else:
+            flags = ["camera-hosted"] + [fl for fl in ext.flags if fl != "camera-hosted"]
+            cam = LineCamera(roll=hosted.roll, pitch=hosted.pitch, f=focal, conf=HOSTED_CONF, conf_f=0.0,
+                             source="hosted", flags=flags)
+    if use_height and ext.height_m is not None and ext.height_m > 0:
+        hp = (float(ext.height_m), HOSTED_H_SIGMA)
+        return cam, hp, hp
+    return cam, h_prior, None
 
 
 def _at_focal(cam: LineCamera, f: float) -> LineCamera:

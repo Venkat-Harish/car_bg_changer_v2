@@ -629,7 +629,13 @@ def place_room_photos(photos: list[Photo], run: Run, rr: RoomRun, rows: list[dic
         return
     items = [p.measured for p in photos]
     if rr.hosted is not None:  # [hosted] camera: MoGe-3 per frame + VGGT per folder -> Measured.external
-        rr.hosted.camera(photos)
+        yaw_prior = rr.hosted.camera(photos, read_image, full_frame_alpha)
+        if yaw_prior:  # VGGT's angles between shots, anchored on the labels: the view prior for the fit
+            rows_vp = dict(rr.view_rows or {})
+            for stem, probs in yaw_prior.items():
+                rows_vp[stem] = {**rows_vp.get(stem, {"angle": float("nan"), "time": None}), "probs": probs}
+            rr.view_rows = rows_vp
+            print(f"view prior: VGGT's angles between shots, anchored on the view labels ({len(yaw_prior)} photos)")
     choose_focals(items, rr.focal)
     if rr.hosted is not None:
         rr.hosted.apply_focals(items, rr.focal)

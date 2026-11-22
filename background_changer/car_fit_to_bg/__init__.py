@@ -102,8 +102,10 @@ def _expected_tilt(shape, body, R, t, f, c, size) -> float | None:
 
 def fit_photo(frame: np.ndarray, alpha: np.ndarray, cut, shape: CarShape, focal: float, focal_source: str,
               cam: LineCamera, probs: dict | None = None, label: str | None = None,
-              h_prior: tuple[float, float] | None = None, max_seconds: float = 120.0, stem: str = "") -> PhotoFit:
-    """Everything about one photo that does not depend on the background. alpha: full-frame car alpha."""
+              h_prior: tuple[float, float] | None = None, max_seconds: float = 120.0, stem: str = "",
+              strong_h_prior: tuple[float, float] | None = None) -> PhotoFit:
+    """Everything about one photo that does not depend on the background. alpha: full-frame car alpha.
+    strong_h_prior: a measured camera height (h, sigma) used even with strong lines (pose.fit_pose)."""
     from .pose import fit_pose
     t0 = time.perf_counter()
     H, W = alpha.shape
@@ -124,7 +126,8 @@ def fit_photo(frame: np.ndarray, alpha: np.ndarray, cut, shape: CarShape, focal:
             alt = "sedan" if body == "hatch" else "hatch"
     cue = red_cue(frame, alpha)
     pose = fit_pose(alpha, cut, shape, focal, body, probs=probs, cue=cue, line_roll=cam.roll, line_pitch=cam.pitch,
-                    strong_lines=cam.strong, h_prior=h_prior, label=label, max_seconds=max_seconds, alt_body=alt)
+                    strong_lines=cam.strong, h_prior=h_prior, label=label, max_seconds=max_seconds, alt_body=alt,
+                    strong_h_prior=strong_h_prior)
     flags += [fl for fl in pose.flags if fl not in flags]
     R_pc, t_pc = pose.rt(c)
     C_car = -R_pc.T @ t_pc
