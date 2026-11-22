@@ -80,9 +80,17 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 PATH_KEYS = ("images_folder", "backgrounds_folder", "output_folder", "cars_file")
 CONFIG_KEYS = (*PATH_KEYS, "background", "car", "cut_frames", "debug_mode", "model", "threads", "shadow",
                "edge_shrink", "quality", "save_cutouts", "background_scale", "background_min_width", "scene",
-               "background_view", "max_output_size", "keep_background_sharp", "fit", "car_isolation")
+               "background_view", "max_output_size", "keep_background_sharp", "fit", "car_isolation", "hosted")
 ISOLATION_KEYS = ("enabled", "min_score", "remove_objects")
 ISOLATION_CSV_FIELDS = ["isolation", "isolate_s"]  # appended only when car_isolation is on
+# [hosted]: Idea B, hosted open models on fal.ai (hosted/, docs/glass-cutout-camera-options.md set-up B)
+HOSTED_BOOL_KEYS = ("enabled", "cutout", "glass_tint", "camera", "vggt")
+HOSTED_KEYS = (*HOSTED_BOOL_KEYS, "tint_strength", "tint_keep", "max_cost_per_car", "timeout_s", "max_side")
+HOSTED_DEFAULTS = {"enabled": False, "cutout": True, "glass_tint": True, "camera": True, "vggt": True,
+                   "tint_strength": 0.85, "tint_keep": 0.15, "max_cost_per_car": 3.0, "timeout_s": 120,
+                   "max_side": 2048}
+HOSTED_CSV_FIELDS = ["hosted", "sam3_status", "glass_pct", "camera_source", "moge_f", "moge_h", "vggt_ok",
+                     "cost_usd"]  # appended only when [hosted] is on
 MIN_WIDTH_FLOOR = 64  # smallest allowed background_min_width
 VIEW_MODES = ("room", "flat")
 ROOM_CUT_POLICIES = ("frame", "skip")
@@ -122,7 +130,7 @@ def load_config(path: Path, required: bool = True) -> dict:
     if not path.exists():
         if required:
             raise SystemExit(f"config file not found: {path}")
-        return {"scene": {}, "fit": {}, "car_isolation": {}}
+        return {"scene": {}, "fit": {}, "car_isolation": {}, "hosted": dict(HOSTED_DEFAULTS)}
     try:
         with open(path, "rb") as f:
             cfg = tomllib.load(f)
@@ -163,6 +171,7 @@ def load_config(path: Path, required: bool = True) -> dict:
         raise SystemExit(f"'keep_background_sharp' in {path} must be true or false")
     cfg["fit"] = parse_fit(cfg.get("fit", {}), path)
     cfg["car_isolation"] = parse_isolation(cfg.get("car_isolation", {}), path)
+    cfg["hosted"] = parse_hosted(cfg.get("hosted", {}), path)
     if "background_scale" in cfg and cfg["background_scale"] not in SCALE_MODES:
         raise SystemExit(f"'background_scale' in {path} must be one of: {', '.join(SCALE_MODES)}")
     if "background_min_width" in cfg:
@@ -208,6 +217,33 @@ def parse_isolation(table, path: Path) -> dict:
     if "min_score" in table and not (is_number(table["min_score"]) and 0 < table["min_score"] < 1):
         raise SystemExit(f"{where}: 'min_score' must be a number between 0 and 1")
     return dict(table)
+
+
+def parse_hosted(table, path: Path) -> dict:
+    """[hosted] enabled/cutout/glass_tint/camera/vggt = bool; tint_strength, tint_keep = 0..1;
+    max_cost_per_car >= 0 (0 = no limit); timeout_s > 0; max_side = 0 or >= 256 px. Returns the full settings
+    (defaults filled in)."""
+    where = f"[hosted] in {path}"
+    if not isinstance(table, dict):
+        raise SystemExit(f"'hosted' in {path} must be a [hosted] block")
+    unknown = sorted(set(table) - set(HOSTED_KEYS))
+    if unknown:
+        raise SystemExit(f"{where}: unknown setting(s) {', '.join(unknown)}; allowed: {', '.join(HOSTED_KEYS)}")
+    for key in HOSTED_BOOL_KEYS:
+        if key in table and not isinstance(table[key], bool):
+            raise SystemExit(f"{where}: '{key}' must be true or false")
+    for key in ("tint_strength", "tint_keep"):
+        if key in table and not (is_number(table[key]) and 0 <= table[key] <= 1):
+            raise SystemExit(f"{where}: '{key}' must be a number from 0 to 1")
+    if "max_cost_per_car" in table and not (is_number(table["max_cost_per_car"]) and table["max_cost_per_car"] >= 0):
+        raise SystemExit(f"{where}: 'max_cost_per_car' must be a number of US dollars, 0 or more (0 = no limit)")
+    if "timeout_s" in table and not (is_number(table["timeout_s"]) and table["timeout_s"] > 0):
+        raise SystemExit(f"{where}: 'timeout_s' must be a number of seconds above 0")
+    if "max_side" in table:
+        v = table["max_side"]
+        if isinstance(v, bool) or not isinstance(v, int) or (v != 0 and v < 256):
+            raise SystemExit(f"{where}: 'max_side' must be a whole number of pixels, 256 or more (0 = full size)")
+    return {**HOSTED_DEFAULTS, **table}
 
 
 def check_background_choice(value, where: str) -> list[str]:
@@ -331,6 +367,8 @@ class Photo:
     t_seg: float
     frame_size: tuple[int, int] = (0, 0)  # room mode: the whole photo's (width, height)
     measured: Measured | None = None  # room mode: its line camera (stage 1)
+    frame_path: Path | None = None  # [hosted] glass tint: the tinted frame stage 3 re-reads instead of `path`
+    hosted: dict | None = None  # [hosted]: HOSTED_CSV_FIELDS values
 
 
 @dataclass
@@ -392,7 +430,11 @@ def debug_step(draw, *args) -> None:
 
 def iso_text(photo: Photo) -> str:
     iso = photo.car.isolation
-    return f"  [isolation: {iso['text']}, {iso['seconds']:.1f}s]" if iso else ""
+    text = f"  [isolation: {iso['text']}, {iso['seconds']:.1f}s]" if iso else ""
+    if photo.hosted:
+        h = photo.hosted
+        text += f"  [hosted: cut-out {h['hosted']}, SAM 3 {h['sam3_status'] or '-'}, glass {h['glass_pct']}%]"
+    return text
 
 
 def describe(photo: Photo, cut_policy: str) -> str:
@@ -418,7 +460,7 @@ def place_photo(photo: Photo, run: Run, scales: dict[str, float]) -> tuple[list[
                 "view_label": info.label if info else "", "view_conf": info.conf if info else "",
                 "yaw": round(yaw.deg, 1), "yaw_source": yaw.source, "car_x1": photo.box[0], "car_y1": photo.box[1],
                 "car_x2": photo.box[2], "car_y2": photo.box[3], "cut_off": cut, "segment_s": round(photo.t_seg, 2),
-                **isolation_cols(photo)}
+                **isolation_cols(photo), **(photo.hosted or {})}
         if plan is None:
             rows.append({**base, "note": skip_reason(probe, run.cut_policy) or "not placed"})
             continue
@@ -480,6 +522,7 @@ class RoomRun:
     cut_policy: str  # frame | skip
     view_rows: dict | None  # frame_view_type's classifier results for these photos
     overrides: dict  # [scene.<name>] settings
+    hosted: object = None  # hosted.pipeline.HostedRun when [hosted] camera is on (between stages 1 and 2)
 
 
 def room_spec(stem: str, plate: np.ndarray, overrides: dict):
@@ -507,7 +550,7 @@ def base_row(photo: Photo) -> dict:
     return {"file": photo.path.name, "view_label": info.label if info else "", "view_conf": info.conf if info else "",
             "car_x1": photo.box[0], "car_y1": photo.box[1], "car_x2": photo.box[2], "car_y2": photo.box[3],
             "cut_off": ",".join(photo.probe.cut), "segment_s": round(photo.t_seg, 2), "view_mode": "room",
-            **isolation_cols(photo)}
+            **isolation_cols(photo), **(photo.hosted or {})}
 
 
 def fit_summary(photo: Photo, fit) -> dict:
@@ -527,7 +570,8 @@ def fit_summary(photo: Photo, fit) -> dict:
 def room_row(photo: Photo, stem: str, scene_name: str, fit, summary: dict, placed, crop_xy, h_source: str) -> dict:
     p, mt = fit.pose, placed.metrics
     flags = list(dict.fromkeys(summary["flags"] + placed.flags))
-    roll_source = "neighbours" if fit.cam.source == "neighbours" else ("lines" if fit.cam.strong else "silhouette")
+    roll_source = (fit.cam.source if fit.cam.source in ("neighbours", "hosted")
+                   else ("lines" if fit.cam.strong else "silhouette"))
     crop = max((v["crop_px"] for v in fit.cut_edges.values()), default=0.0)
     crop_pct = max((v["crop_pct"] for v in fit.cut_edges.values()), default=0.0)
     cut = ",".join(photo.probe.cut)
@@ -546,7 +590,8 @@ def room_row(photo: Photo, stem: str, scene_name: str, fit, summary: dict, place
             "contact_residual_px": mt["contact_residual_px"] if measured else "", "invented_pct": mt["invented_pct"],
             "invented_near_pct": mt["invented_near_pct"], "floor_texels": mt["floor_texels"],
             "fit_s": round(fit.seconds, 1), "render_s": mt["render_s"],
-            "note": f"car runs off the photo ({cut}); framed like the photo" if cut else ""}
+            "note": f"car runs off the photo ({cut}); framed like the photo" if cut else "",
+            **({"camera_source": roll_source} if photo.hosted is not None else {})}
 
 
 def measure_photo(path: Path, image: np.ndarray, alpha: np.ndarray) -> Measured:
@@ -572,7 +617,7 @@ def describe_room(photo: Photo, cut_policy: str) -> str:
     return text
 
 
-FOCAL_TEXT = {"config": "[fit] focal", "pooled": "the folder's background lines", "lines": "its own lines",
+FOCAL_TEXT = {"hosted": "the hosted camera models (VGGT / MoGe-3)", "config": "[fit] focal", "pooled": "the folder's background lines", "lines": "its own lines",
               "exif": "EXIF", "lines-weak": "uncertain lines", "prior": "a typical phone lens (no lines)"}
 
 
@@ -583,7 +628,11 @@ def place_room_photos(photos: list[Photo], run: Run, rr: RoomRun, rows: list[dic
     if not photos:
         return
     items = [p.measured for p in photos]
+    if rr.hosted is not None:  # [hosted] camera: MoGe-3 per frame + VGGT per folder -> Measured.external
+        rr.hosted.camera(photos)
     choose_focals(items, rr.focal)
+    if rr.hosted is not None:
+        rr.hosted.apply_focals(items, rr.focal)
     specs = {stem: room_spec(stem, plate, rr.overrides) for stem, plate, _ in run.loaded}
     rooms = {stem: room_for(stem, specs[stem], plate.shape) for stem, plate, _ in run.loaded}
     flat_jobs: dict[str, list] = {stem: [] for stem, _, _ in run.loaded}
@@ -611,7 +660,7 @@ def place_room_photos(photos: list[Photo], run: Run, rr: RoomRun, rows: list[dic
             print(f"{head} skipped ({reason})", flush=True)
             continue
         try:
-            frame = read_image(photo.path)
+            frame = read_image(photo.frame_path or photo.path)
         except OSError:  # moved or deleted since it was cut out
             frame = None
         if frame is None or (frame.shape[1], frame.shape[0]) != photo.frame_size:
@@ -770,6 +819,8 @@ def main() -> None:
                              "(overrides 'background_scale')")
     parser.add_argument("--isolate", action=argparse.BooleanOptionalAction, default=None,
                         help="remove other vehicles/objects stuck to the car's outline (overrides [car_isolation] enabled)")
+    parser.add_argument("--hosted", action=argparse.BooleanOptionalAction, default=None,
+                        help="hosted models on fal.ai: cut-out, glass tint, camera (overrides [hosted] enabled)")
     parser.add_argument("--debug", action="store_true",
                         help="also write a debug picture for every step, in <output>\\debug\\<photo>\\ "
                              "(turns on 'debug_mode' for this run)")
@@ -803,6 +854,11 @@ def main() -> None:
     fit_cfg = cfg.get("fit", {})
     iso_cfg = cfg.get("car_isolation", {})
     isolate = args.isolate if args.isolate is not None else iso_cfg.get("enabled", False)
+    hosted_cfg = cfg.get("hosted", HOSTED_DEFAULTS)
+    hosted = args.hosted if args.hosted is not None else hosted_cfg.get("enabled", False)
+    if hosted and isolate:
+        print("note: [hosted] is on, so SAM 3 keeps only this car; [car_isolation] is not used in this run")
+        isolate = False
     debug = args.debug or cfg.get("debug_mode", False)
     scaler = BackgroundScaler(args.background_scale or cfg.get("background_scale", DEFAULT_SCALE_MODE),
                               cfg.get("background_min_width", DEFAULT_MIN_WIDTH))
@@ -908,12 +964,28 @@ def main() -> None:
         print(f"background size: {SCALE_TEXT[scaler.mode]} (background_scale = \"{scaler.mode}\""
               + (f", at least {scaler.min_width} px wide)" if scaler.mode != "off" else ")"))
     t_load = time.perf_counter()
+    hr = None
+    if hosted:
+        from hosted.pipeline import HostedRun
+        hr = HostedRun(hosted_cfg, out_dir, (args.out or cfg.get("output_folder", DEFAULT_OUTPUT)) / "_hosted_cache",
+                       ROOT / ".env", (model, edge_shrink, threads), edge_shrink)
+        if rr is not None and hosted_cfg["camera"]:
+            rr.hosted = hr
+        parts = [t for t, on in (("BiRefNet cut-out", hosted_cfg["cutout"]), ("SAM 3 keeps only this car", True),
+                                 ("glass tint (all windows; untouched photos kept in originals)", hosted_cfg["glass_tint"]),
+                                 ("MoGe-3 camera", hosted_cfg["camera"] and view == "room"),
+                                 ("VGGT joint solve", hosted_cfg["camera"] and hosted_cfg["vggt"] and view == "room"))
+                 if on]
+        limit = hosted_cfg["max_cost_per_car"]
+        print("hosted on fal.ai: " + ", ".join(parts) + (f"; at most ${limit:g} for this folder" if limit else ""))
     try:
-        segmenter = CarSegmenter(model, edge_shrink, threads)
+        segmenter = hr.segmenter if hr is not None else CarSegmenter(model, edge_shrink, threads)
     except ValueError as exc:  # rembg: unknown model name
         raise SystemExit(f"cannot load model '{model}': {exc}\n"
                          "Use 'birefnet-general-lite' (default) or 'birefnet-general'.") from None
-    print(f"model {model} loaded in {time.perf_counter() - t_load:.1f}s (CPU, threads={threads or 'auto'})", flush=True)
+    if hr is None:
+        print(f"model {model} loaded in {time.perf_counter() - t_load:.1f}s (CPU, threads={threads or 'auto'})",
+              flush=True)
     isolator, raws = None, {}
     if isolate:  # two passes, so BiRefNet and SAM are never in memory together (16 GB laptop)
         raws = precompute_raw(segmenter, images)
@@ -953,7 +1025,11 @@ def main() -> None:
             t0 = time.perf_counter()
             trace, raw_dbg = ({}, None) if dw is not None else (None, None)  # debug_mode: each step's mask
             try:
-                if isolator is None:
+                if hr is not None:
+                    car, raw = hr.cut_out(path, image, trace)
+                    raw_dbg = raw if dw is not None else None
+                    del raw
+                elif isolator is None:
                     if dw is None:
                         car = segmenter.cut_out(image)
                     else:  # the same as cut_out, keeping the model's raw mask for the pictures
@@ -972,13 +1048,16 @@ def main() -> None:
                 if dw is not None and raw_dbg is not None:  # the photo and the model's mask still help here
                     debug_step(cutout_pictures, dw, path.stem, image, raw_dbg, {}, None, model)
                 continue
+            frame_path = None
+            if hr is not None:  # glass tint: the only change to the car's pixels, inside the window mask only
+                image, frame_path, _ = hr.glass(path, image, car.alpha)
             t_seg = time.perf_counter() - t0
             t_seg_total += t_seg
             n_done += 1
             if save_cutouts:
                 write_image(out_dir / "cutouts" / f"{path.stem}.webp", cutout_bgra(image, car), quality=101)
             if dw is not None:
-                iso = segmenter.last_isolation if isolator is not None else None
+                iso = segmenter.last_isolation if (isolator is not None or hr is not None) else None
                 iso_img = None
                 if iso is not None:
                     from car_isolation import overlay
@@ -989,7 +1068,11 @@ def main() -> None:
             segmenter.last_isolation = None
 
             measured = measure_photo(path, image, car.alpha) if view == "room" else None
+            if measured is not None and hr is not None:
+                measured.flags += hr.flags(path.stem)
             photo = prepare_photo(path, image, car, table, t_seg)
+            if hr is not None:
+                photo.frame_path, photo.hosted = frame_path, hr.cols(path.stem)
             if measured is not None:  # room mode: placed once every photo's lines are measured
                 photo.frame_size, photo.measured = (image.shape[1], image.shape[0]), measured
                 if not keep_crops:  # stage 3 re-reads the photo; the crop is only for flat placements
@@ -1027,7 +1110,8 @@ def main() -> None:
                 file_order(rows, images, loaded)
             with open(out_dir / "results.csv", "w", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=(ROOM_CSV_FIELDS if view == "room" else CSV_FIELDS)
-                                        + (ISOLATION_CSV_FIELDS if isolate else []), restval="")
+                                        + (ISOLATION_CSV_FIELDS if isolate else [])
+                                        + (HOSTED_CSV_FIELDS if hr is not None else []), restval="")
                 writer.writeheader()
                 writer.writerows(rows)
     elapsed = time.perf_counter() - t_start
@@ -1049,6 +1133,10 @@ def main() -> None:
         print(f"{len(placed)} photo(s) placed" + (f", {len(skipped - placed)} not placed (see 'note')"
                                                   if skipped - placed else "")
               + (f"; {len(flagged)} flagged for a look (see 'flags' in results.csv)" if flagged else ""))
+    if hr is not None:
+        sp = hr.client.spend
+        billed = ", ".join(f"{k} ${v:.2f}" for k, v in sp.by_endpoint.items()) or "nothing billed"
+        print(f"hosted: {sp.calls} fal call(s), {sp.cached} from the cache, about ${sp.usd:.2f} ({billed})")
     print(f"saved to {out_dir}")
 
 

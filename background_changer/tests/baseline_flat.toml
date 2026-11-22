@@ -20,3 +20,6 @@ threads = 4
 edge_shrink = 2
 quality = 90
 save_cutouts = true
+
+[hosted]
+enabled = false  # the baseline predates hosted models

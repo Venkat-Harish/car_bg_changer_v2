@@ -7,3 +7,5 @@ numpy==2.4.6
 pillow==13.0.0
 scipy==1.17.1
 pytest==9.2.0
+# [hosted] (fal.ai queue REST API); already a dependency of pooch, pinned here because hosted/fal.py uses it.
+requests==2.34.2

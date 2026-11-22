@@ -157,3 +157,36 @@ focal = "auto"
 #   "place" = place it anyway with the view angle from its file name, flagged fit-failed in results.csv
 #   "skip"  = leave it out (also skips photos whose camera would sit outside a background's room)
 on_fail = "place"
+
+# ---------------------------------------------------------------- hosted models on fal.ai (Idea B)
+[hosted]
+# Set-up B of docs/glass-cutout-camera-options.md: hosted open models, nothing generated. About $0.04 per photo
+# (~$1.50 per 36-frame car); results are cached in output\_hosted_cache\, so a rerun of the same photos is free.
+# Needs a fal.ai key: the FAL_KEY environment variable, or FAL_KEY=... in background_changer\.env (never committed).
+#   true  = BiRefNet on fal cuts the car out, SAM 3 keeps only this car, the glass is tinted, and MoGe-3 + VGGT
+#           measure the camera (room mode). Any step that fails on fal falls back to the laptop path, flagged.
+#   false = the laptop-only path, exactly as before.
+# Command line: --hosted / --no-hosted. Overrides [car_isolation] (SAM 3 already keeps only this car).
+enabled = true
+
+# BiRefNet on fal for the cut-out edge (false = the local model in 'model').
+cutout = true
+
+# Glass: every window (windscreen included) gets the same clean dark tint, keeping a faint trace of the original.
+# This is the ONLY change to the car's own pixels, and only inside the window mask SAM 3 finds. The untouched
+# photo is always copied to output\<folder>\originals\ next to the results.
+glass_tint = true
+tint_strength = 0.85   # 0-1: how much of the tint replaces the glass at its centre (edges are feathered)
+tint_keep = 0.15       # 0-1: share of the original glass that stays visible through the tint
+
+# Camera (room mode): MoGe-3 per photo (focal length, floor -> camera height, pitch, roll), and VGGT solving all
+# photos of the car together (shared focal length, the angle between shots). The background lines are the fallback.
+camera = true
+vggt = true
+
+# Stop calling fal (and fall back to the laptop path) once this folder's estimated spend reaches this many US
+# dollars. 0 = no limit.
+max_cost_per_car = 3.0
+
+timeout_s = 120        # seconds to wait for one fal request
+max_side = 2048        # photos are sent at most this many px on the long side (0 = full size); masks come back at full size

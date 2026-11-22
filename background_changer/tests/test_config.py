@@ -146,3 +146,33 @@ def test_shipped_config_uses_room_mode():
     assert cfg["background_view"] == "room" and cfg["cut_frames"] == "frame"
     assert cfg["max_output_size"] == cb.DEFAULT_MAX_OUTPUT and cfg["keep_background_sharp"] is True
     assert cfg["fit"] == {"focal": "auto", "on_fail": "place"}
+
+
+def test_hosted_block_defaults_and_values(tmp_path):
+    cfg = cb.load_config(write_config(tmp_path, 'background_view = "room"\n'))
+    assert cfg["hosted"] == cb.HOSTED_DEFAULTS and cfg["hosted"]["enabled"] is False  # off unless asked for
+    cfg = cb.load_config(write_config(tmp_path, """
+[hosted]
+enabled = true
+glass_tint = false
+tint_keep = 0.3
+max_cost_per_car = 0
+max_side = 0
+"""))
+    h = cfg["hosted"]
+    assert (h["enabled"], h["glass_tint"], h["tint_keep"], h["max_cost_per_car"], h["max_side"]) == (True, False, 0.3, 0, 0)
+    assert h["cutout"] is True and h["timeout_s"] == 120  # defaults filled in
+
+
+@pytest.mark.parametrize("bad", ['hosted = 1', '[hosted]\nenabled = "yes"', '[hosted]\nvggt = 1',
+                                 '[hosted]\ntint_strength = 1.5', '[hosted]\ntint_keep = -0.1',
+                                 '[hosted]\nmax_cost_per_car = -1', '[hosted]\ntimeout_s = 0', '[hosted]\nmax_side = 100',
+                                 '[hosted]\nmax_side = 1024.0', '[hosted]\napi_key = "x"'])
+def test_bad_hosted_values_are_rejected(tmp_path, bad):
+    with pytest.raises(SystemExit):
+        cb.load_config(write_config(tmp_path, bad + "\n"))
+
+
+def test_shipped_config_turns_hosted_on_and_the_baseline_off():
+    assert cb.load_config(cb.DEFAULT_CONFIG)["hosted"] == {**cb.HOSTED_DEFAULTS, "enabled": True}
+    assert cb.load_config(Path(__file__).parent / "baseline_flat.toml")["hosted"]["enabled"] is False
