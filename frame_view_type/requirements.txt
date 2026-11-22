@@ -1,0 +1,7 @@
+# Inference-only dependencies for classify_video.py (CPU).
+# torch / torchvision match the versions pinned by vendor/view_classifier.
+torch==2.9.1
+torchvision==0.24.1
+pillow
+numpy
+opencv-python-headless

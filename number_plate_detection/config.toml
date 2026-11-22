@@ -1,0 +1,55 @@
+# Settings for mask_plates.py.
+# Relative paths are relative to this folder (number_plate_detection).
+# For full Windows paths use single quotes, e.g.  input = 'D:\photos\car.jpg'
+# (or forward slashes in double quotes: "D:/photos/car.jpg").
+
+# One image, or a folder of images (.jpg .jpeg .png .bmp .webp).
+input = "../frame_view_type/output/sample_vid"
+
+# Where results go. Each input gets its own subfolder: <output>\<input name>\
+output = "output"
+
+# Cover each plate with overlay_image, warped onto the plate's 4 corners (true),
+# or paint it with 'color' (false).
+overlay = true
+overlay_image = "assets/RC.png"
+
+# Automatic brightness (plate_brightness_detector).
+# true  = for every plate, the module picks the overlay's brightness itself, for any plate colour:
+#         from something white on the plate (background or letters), else from a light paint
+#         such as yellow (corrected for its colour), else from the photo around it.
+# false = use 'lighting' below.
+auto_brightness = true
+
+# Video only, with auto_brightness: smooth the main plate's brightness over this many recent
+# frames so the overlay doesn't flicker. 0 = off (keep 0 for separate photos).
+brightness_smoothing = 0
+
+# Used when auto_brightness = false. How far (0-100 %) to match the overlay to the original
+# plate's lighting. 0 = the overlay exactly as it is (full brightness, can look pasted on);
+# 100 = its white looks like the original plate's white in that photo (sun, shade, gradient);
+# 50 = halfway. Only affects the overlay, not the solid fill.
+lighting = 100
+
+# Fill colour, as [red, green, blue], 0-255. Used when overlay = false, and for any plate
+# whose corners can't be found (it then gets a straight box in this colour).
+color = [0, 0, 0]
+
+# Follow each plate's own outline (true), or use the detector's straight box (false).
+tight_fit = true
+
+# Extra margin beyond the plate's edge, as a share of the plate's height.
+# 0 = exactly the plate; 0.05 = a little bigger.
+padding = 0.0
+
+# Detector. Bigger input size = finds smaller plates, but slower.
+# yolo-v9-t-256 / -384 / -416 / -512 / -640-license-plate-end2end, or yolo-v9-s-608-license-plate-end2end.
+# A path to a local .onnx file also works.
+model = "yolo-v9-t-384-license-plate-end2end"
+
+# Keep plates the model is at least this sure about (0-1). Lower = fewer missed plates, more false masks.
+confidence = 0.25
+
+# CPU threads for the detector. 4 was fastest on this PC; 0 = use every core
+# (slower here whenever other apps are busy). 1-2 keeps the CPU free for other work.
+threads = 4

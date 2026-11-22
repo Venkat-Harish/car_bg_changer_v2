@@ -1,0 +1,18 @@
+[
+  {
+    "carModel": "Mercedes-Benz EQB 2024",
+    "length": 468.4,
+    "width": 183.4,
+    "height": 166.7,
+    "WheelBase": 282.9,
+    "body": "suv"
+  },
+  {
+    "carModel": "Maruti Suzuki Baleno 2022",
+    "length": 399.0,
+    "width": 174.5,
+    "height": 150.0,
+    "WheelBase": 252.0,
+    "body": "hatch"
+  }
+]

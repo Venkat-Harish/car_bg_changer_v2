@@ -1,0 +1,32 @@
+# Settings for make_video.py. Edit, save, then run (from the video_pipeline folder):
+#     ..\background_changer\.venv\Scripts\python make_video.py
+# Relative paths are relative to this folder (video_pipeline).
+
+# The input video.
+video = "../frame_view_type/sample_vid.mp4"
+
+# carModel in background_changer/cars.json.
+car = "Maruti Suzuki Baleno 2022"
+
+# One background name (file name without extension) from background_changer/backgrounds.
+background = "background_1"
+
+# Frames sampled per second of video. The room-mode fit costs ~25-40 s per frame on CPU,
+# so 5 is a sensible start; 0 = every frame of the video.
+fps = 5
+
+# Playback speed of the result: "source" = the video's own duration (one output frame per sampled
+# frame, so the sampled fps), or a number = frames per second of the output video.
+output_fps = "source"
+
+# Only process the first N seconds of the video. 0 = the whole video.
+max_seconds = 10
+
+# Test cap: only process the first N sampled frames. 0 = all.
+max_frames = 0
+
+# Plate overlay smoothing over this many recent frames (stops brightness flicker).
+brightness_smoothing = 5
+
+# Work and results folder: <output>/<video name>/{frames,masked,background,<video name>.mp4}
+output = "output"

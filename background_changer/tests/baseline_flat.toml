@@ -1,0 +1,22 @@
+# Pinned settings for the flat-path baseline (plan: car_fit_to_bg + room3d, Verification 1).
+# The baseline was produced by the code as it was before room mode existed:
+#   .venv\Scripts\python change_background.py --config tests\baseline_flat.toml <images folder> --car "<carModel>"
+# The code with room mode must reproduce it pixel-exactly in flat mode (tools/check_flat.py compares), so this
+# file pins background_view = "flat" (the old code had no such setting: flat was all there was). Re-run with
+# --out output\_flat_check so the pinned baseline itself is not overwritten.
+# Paths are relative to this file's folder.
+background_view = "flat"
+backgrounds_folder = "../backgrounds"
+background = ["background_1", "background_2", "background_3"]
+output_folder = "../output/_baseline_flat"
+cars_file = "../cars.json"
+cut_frames = "anchor"
+background_scale = "folder"
+background_min_width = 640
+shadow = 1.0
+debug_mode = true  # was debug_overlay (renamed); the flat overlays still go to <background>\debug\
+model = "birefnet-general-lite"
+threads = 4
+edge_shrink = 2
+quality = 90
+save_cutouts = true

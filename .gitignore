@@ -1,0 +1,29 @@
+# Virtual envs & caches
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Large media
+*.mp4
+
+# Generated output (any depth)
+output/
+
+# Oversized model weights (>100 MB GitHub limit)
+*.pt
+
+# Local / OS
+.claude/settings.local.json
+.DS_Store
+Thumbs.db
+
+# Third-party clone with its own .git (veerupandey/view_classifier)
+frame_view_type/vendor/view_classifier/
+*.log
+
+# Secrets
+.env
+

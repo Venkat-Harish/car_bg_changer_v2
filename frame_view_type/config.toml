@@ -1,0 +1,16 @@
+# Settings for classify_video.py.
+# Relative paths are relative to this folder (frame_view_type).
+# For full Windows paths use single quotes, e.g.  input = 'D:\videos\car.mp4'
+# (or forward slashes in double quotes: "D:/videos/car.mp4").
+
+# Video to process.
+input = "sample_vid.mp4"
+
+# Where results go. Each video gets its own subfolder: <output>\<video name>\
+output = "output"
+
+# Take one frame every N seconds (2 = every 2 s, 3 = every 3 s, 0.5 = twice a second).
+every_seconds = 2
+
+# Model weights (normally leave as is).
+checkpoint = "vendor/view_classifier/models/joint_v2_best.pt"

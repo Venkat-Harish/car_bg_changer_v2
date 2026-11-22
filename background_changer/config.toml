@@ -1,0 +1,159 @@
+# Settings for change_background.py. Edit, save, then run (from the background_changer folder):
+#     .venv\Scripts\python change_background.py
+#
+# Relative paths are relative to this folder (background_changer).
+# For full Windows paths use single quotes, e.g.  images_folder = 'D:\photos\car_123'
+# (or forward slashes in double quotes: "D:/photos/car_123").
+
+# ---------------------------------------------------------------- edit these
+
+# The car photos: a folder of images (.jpg .jpeg .png .bmp .webp), or one image.
+# Default: the frames from number_plate_detection, so the plates are already masked.
+# File names carry the side of the car shown, e.g. 0012.0s_right_95pct.jpg (from frame_view_type).
+images_folder = "../number_plate_detection/output/sample_vid"
+
+# Which car is in the photos: its carModel in cars.json (dimensions in cm, and its body type).
+car = "Maruti Suzuki Baleno 2022"
+
+# The folder holding the background images. Drop any new background image in here.
+backgrounds_folder = "backgrounds"
+
+# Which background(s) to use, by file name without the extension:
+#   background = "background_1"                      one background
+#   background = ["background_1", "background_3"]    several (each gets its own output folder)
+#   background = "all"                               every image in backgrounds_folder
+background = "background_1"
+
+# Where results go: <output_folder>\<images folder name>\<background name>\<photo>.webp
+output_folder = "output"
+
+# Debug pictures for every step, to see how each result was made:
+#   true  = <output_folder>\<images folder name>\debug\<photo>\ gets one picture per step, numbered in order:
+#           the cut-out (model mask, clean-up, final car), the camera from the background lines, the search for
+#           the car's view angle, the 3D car's outline against the photo's, the levelling, the tyres, and per
+#           background the re-rendered room, its surfaces, the shadows and the placed result. Each picture has
+#           a caption saying what it shows and what each colour means (also in debug\README.txt).
+#           Takes a few seconds more per photo and about 1-3 MB of pictures per photo and background.
+#   false = off: no debug pictures (normal runs).
+# Command line: --debug turns it on for one run.
+debug_mode = false
+
+# How the car is put on the background:
+#   "room" = each photo's camera (tilt, height, lens) is measured from the photo itself and the background
+#            is re-rendered as a 3D room from that same camera, so the car stands on the floor at any
+#            camera angle. Each output keeps the photo's own framing (portrait stays portrait).
+#   "flat" = the older placement: the car is scaled and moved onto the background's stage as it is.
+background_view = "room"
+
+# ---------------------------------------------------------------- room mode (background_view = "room")
+
+# Cap on the output's long side (px); 0 = none. Outputs keep the photo's size or come out smaller (a few px
+# larger only when levelling a car near the photo's edge would otherwise cut part of it off). A background
+# without a 3D room is placed flat and keeps flat mode's sizes.
+max_output_size = 1920
+
+# true  = the background is never magnified where the car stands, so it stays sharp. High-resolution photos
+#         (e.g. 4K) then come out smaller than max_output_size (about 900-1450 px wide), and a close-up or a photo
+#         from high above can come out smaller than the photo, by a different amount per background.
+# false = outputs as large as the photo and max_output_size allow; the floor near the car may look slightly soft.
+keep_background_sharp = true
+
+# Photos where the car runs off the photo edge:
+#   "frame" = keep the photo's framing: the cut edge stays on the output's border (room mode; in flat
+#             mode it means "anchor")       "skip" = leave these photos out
+#   flat mode only: "anchor" = place the whole car where it stands, so the missing part shows as a
+#             straight cut; "centre" = centre the visible part
+# A car cut off at the bottom, or on two sides, is always left out in room mode (nothing to stand it on).
+cut_frames = "frame"
+
+# ---------------------------------------------------------------- flat mode (background_view = "flat")
+
+# Small photos (e.g. a phone video at 464x832) hold a car smaller than a full-size background's stage
+# needs, and the car is never enlarged. So background_scaler shrinks the background instead, together
+# with its turntable / road measurements, until the car fills the stage at its own resolution:
+#   "folder" = one size for all photos of the folder, set by the photo with the smallest car
+#   "photo"  = each photo gets the size its own car needs (car pasted pixel for pixel; sizes differ)
+#   "off"    = always the full-size background (a small car then looks small on it)
+# Photos with enough pixels (e.g. 4K) keep the full-size background in every mode.
+# In room mode this applies only to a background without a 3D room (see [scene.<name>] below).
+background_scale = "folder"
+
+# Never shrink a background below this width (px). A car too small even for that is placed smaller.
+background_min_width = 640
+
+# ---------------------------------------------------------------- tuning (usually leave alone)
+
+# The car list (JSON array of {carModel, length, width, height, WheelBase} in cm, and "body":
+# "suv", "hatch" or "sedan" for the 3D fit).
+cars_file = "cars.json"
+
+# Shadow and contact strength under the car, 1 = as calibrated for each background, 0 = none.
+# Drawn on the background only, never on the car.
+shadow = 1.0
+
+# Background-removal model. "birefnet-general-lite" is fast and, at this output size, looks the
+# same as "birefnet-general", which is about 4x slower. Downloaded once on first use.
+model = "birefnet-general-lite"
+
+# CPU threads for the model. 4 was fastest on this laptop; 0 = let ONNX Runtime decide.
+threads = 4
+
+# Pull the soft edge of the cut-out in by this many pixels (of the original photo) to drop a thin
+# fringe of the old background. 0 = off.
+edge_shrink = 2
+
+# WEBP quality 1-100.
+quality = 90
+
+# Also save each car alone, transparent, at full resolution (lossless WEBP) in ...\cutouts\.
+save_cutouts = true
+
+# ---------------------------------------------------------------- per-background fine-tuning
+# Every background has its own scene code in bg_changer\scenes\ (background_1, _2, _3), measured
+# from the picture: where the turntable / stage is and how the floor recedes, and (room mode) its 3D room.
+# Usually nothing to set. Optional adjustments, one block per background:
+#
+# [scene.background_1]
+# size = 1.0          # car size multiplier on this background
+# shadow = 1.0        # shadow multiplier on this background
+# reflection = true   # floor reflection (glossy floors only)
+#
+# A new background without scene code uses a generic stage; tell it where the car stands:
+#
+# [scene.my_showroom]
+# anchor = [960, 760]  # floor point (px) under the middle of the car
+# side_fill = 0.66     # a side view's length as a share of the picture width
+# horizon_y = 520      # the floor's horizon row: gives realistic depth, and in room mode a rough 3D room
+#                      # (floor up to the horizon, the rest of the picture as a far backdrop). Without it,
+#                      # room mode places the car flat, with its fitted view angle (flag no-room).
+# floor = "matte"      # or "glossy" for a faint floor reflection
+
+# ---------------------------------------------------------------- keep only the car (car_isolation)
+[car_isolation]
+# The cut-out model sometimes keeps things that touch the car in the photo: a car parked behind it
+# (seen past the mirror or above the roof), a person, a gate. It also fills every gap inside the outline,
+# e.g. the background seen between the mirror and the door.
+#   true  = a vehicle detector (YOLOX-s) and SAM find *this* car; other vehicles and objects sticking out
+#           of it are removed from the mask, and only window gaps are filled. The car's own pixels are not
+#           changed. Adds about 10-20 s per photo on this laptop. Models (~400 MB) download once on first use.
+#   false = off: runs exactly as before, no extra time.
+# Command line: --isolate / --no-isolate. With debug_mode = true, output\...\debug\<photo>\04_cutout_isolation.jpg
+# shows what was removed (red) and the car SAM found (green).
+enabled = false
+
+# Vehicle detector confidence (0-1). Lower finds more half-hidden cars behind ours.
+min_score = 0.35
+
+# Also remove non-vehicle things that stick out of the car's outline (a person, a gate, a sign).
+remove_objects = true
+
+# ---------------------------------------------------------------- 3D fit (room mode)
+[fit]
+# The lens's focal length: "auto" = measured from the background lines (and pooled over photos of the same
+# size, e.g. one video's frames), or a number in px at the photo's own size if you know it.
+focal = "auto"
+
+# When the car's 3D fit fails (unusual car shape, heavy occlusion):
+#   "place" = place it anyway with the view angle from its file name, flagged fit-failed in results.csv
+#   "skip"  = leave it out (also skips photos whose camera would sit outside a background's room)
+on_fail = "place"
