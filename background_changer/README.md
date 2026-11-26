@@ -203,6 +203,22 @@ for that photo and is flagged in results.csv: `hosted-cutout-failed`, `sam3-fail
 `FAL_KEY` environment variable. Without a key, `[hosted] enabled = true` stops with a message. `--no-hosted` runs
 the old laptop-only path.
 
+**Privacy: what leaves the laptop.** fal.ai receives each photo's pixels: the whole frame, not just the car. It
+doesn't receive EXIF data (GPS, phone, date) or file names. Three settings keep personal data out of that upload,
+in line with India's DPDP Act (send the processor only what the job needs):
+
+- `require_masked_plates = true`: photos go to fal only from a folder that number_plate_detection wrote (it holds
+  `detections.csv`), so every number plate is covered first. Any other folder runs on the laptop-only path, with a
+  message. `make_video.py` and `e2e_steps.py` already mask plates first. Set `false` only for photos without plates.
+- `blur_people = true`: every person YOLOX-s finds on the laptop (bystanders, a driver behind the glass) is
+  pixelated in the copy that is sent. The photo, the outputs and the car's pixels are not changed. Very small
+  far-away figures can be missed. The run ends with a count: `hosted privacy: N person box(es) blurred ...`.
+- `keep_cache_days = 30`: cached fal answers in `output\_hosted_cache\` older than this are deleted when a run starts
+  (0 = keep forever). Your own retention policy also needs to cover `output\<folder>\originals\` and the outputs.
+
+These settings cover only the engineering side. Consent, the notice to the car's owner, the processor agreement
+with fal.ai and breach handling are your organisation's job.
+
 **Glass.** Every window, the windscreen included, gets the same clean dark gradient, keeping a faint trace of the
 original glass (`tint_keep`). The rule is the same for every photo, so a 360° spin doesn't flicker. This is the
 only change ever made to the car's own pixels, and it stays inside the window mask. The untouched photos are always
@@ -338,6 +354,9 @@ With `debug_mode = true` in `config.toml` (or `--debug` for one run), every phot
 | `03_cutout_cleanup` | How that mask became the car's outline: other blobs dropped (orange), posts cut off (red), objects removed by car_isolation (magenta), window holes filled (blue), the soft edge band (yellow), the final outline (green) |
 | `04_cutout_isolation` | (car_isolation on) the car SAM found, other vehicles, what was removed |
 | `05_cutout_result` | The final mask and the car alone on a checkerboard |
+| `05a_glass_mask` | (`[hosted]` glass tint on) SAM 3's window mask (cyan): the only pixels the tint may change, and the glass share of the car |
+| `05b_glass_tint` | (`[hosted]` glass tint on) the car before and after the tint, and the changed pixels outlined; the count outside the mask must be 0 |
+| `05c_hosted_camera` | (`[hosted]` camera, room mode) MoGe-3 + VGGT: focal, pitch, roll, camera height, angle between shots; their horizon (magenta) and the camera the 3D fit used (cyan) |
 | `06_camera_lines` | Room mode: the camera's roll, pitch and lens from the background's straight lines: segments by direction, vanishing directions, the horizon from the lines (cyan) and from the car's 3D fit (yellow) |
 | `07_angle_search` | How the car's view angle was found: the outline match at every 10°, the candidates refined, the winner, the file-name label; the camera's distance, height and angle down |
 | `08_outline_fit` | The cut-out's outline (red) and the fitted 3D car's outline (green) on the photo, its tyre contacts and footprint centre |

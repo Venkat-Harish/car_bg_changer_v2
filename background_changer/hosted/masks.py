@@ -34,6 +34,8 @@ fal-ai/birefnet/v2  (https://fal.ai/models/fal-ai/birefnet/v2/llms.txt)
   out: image: ImageFile{url, content_type, file_name, width, height} (the mask when mask_only), mask_image
        (optional, with output_mask).
   We request mask_only=true and read the mask's grey level (or alpha, if that is what varies); never its colours.
+  Live check (2026-11-24): the mask is a 1-channel PNG at the sent size; "Light 2K" returned all zeros, so we use
+  "General Use (Dynamic)" at 2048. An all-zero mask raises FalError (local fallback, flag hosted-cutout-failed).
 """
 
 from __future__ import annotations
@@ -53,7 +55,9 @@ from .fal import FalClient, FalError
 
 SAM3_ENDPOINT = "fal-ai/sam-3/image"
 BIREFNET_ENDPOINT = "fal-ai/birefnet/v2"
-BIREFNET_MODEL = "General Use (Light 2K)"
+# Checked live 2026-11-24 on sample_vid frames: "General Use (Light 2K)" returns an all-black mask at 1024 and 2048
+# (so every photo looked car-less); "General Use (Dynamic)" at 2048 and "Light"/"Heavy" at 1024 return the car.
+BIREFNET_MODEL = "General Use (Dynamic)"
 BIREFNET_RESOLUTION = "2048x2048"
 SAM3_MAX_MASKS = 16  # instances asked for per prompt (fal allows 1..32)
 
@@ -135,7 +139,10 @@ def birefnet_alpha(client: FalClient, image: np.ndarray, max_side: int = 2048, m
         url = _url(out.get("mask_image"))
     if not url:
         raise FalError(f"{BIREFNET_ENDPOINT}: response has no image url")
-    return _to_size(_level(client.fetch_image(url)), image.shape[:2]).astype(np.float32)
+    level = _level(client.fetch_image(url))
+    if not level.any():  # an all-black mask is a broken response, not a car-less photo: let the local model try
+        raise FalError(f"{BIREFNET_ENDPOINT}: empty mask (model {model!r})")
+    return _to_size(level, image.shape[:2]).astype(np.float32)
 
 
 def sam3_instances(client: FalClient, image: np.ndarray, prompt: str, max_side: int = 2048) -> list[Instance]:

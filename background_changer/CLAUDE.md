@@ -9,7 +9,7 @@ the default) or scales the car onto a fixed stage (flat mode). Repo-wide rules: 
 | File | Role | Key types / entry points |
 |---|---|---|
 | `change_background.py` | Entry point (1056 lines): config loading and validation, CLI, the per-photo loop, room stages 2-3, flat placement, results.csv | `main()`, `load_config`, `parse_fit` / `parse_isolation` / `parse_scene_overrides`, `precompute_raw`, `place_photo`, `folder_scales`, `place_room_photos`, `place_flat_fallback`, `room_row`, `debug_step`; `Photo`, `Run`, `RoomRun`; `CONFIG_KEYS`, `PATH_KEYS`, `FIT_KEYS`, `ISOLATION_KEYS`, `SCENE_KEYS`, `RENAMED`, `CSV_FIELDS`, `ROOM_CSV_FIELDS`, `ISOLATION_CSV_FIELDS`, `VENV_HINT` |
-| `debug_images.py` | `debug_mode` pictures, one per step, captioned; pictures only | `DebugWriter` (`save`, `write_readme`), `cutout_pictures` (01-05), `fit_pictures` (06-11), `room_pictures` (12-16), `flat_picture` (12_flat_placement); `MAX_LONG = 1600` |
+| `debug_images.py` | `debug_mode` pictures, one per step, captioned; pictures only | `DebugWriter` (`save`, `write_readme`), `cutout_pictures` (01-05), `glass_pictures` (05a-05b, hosted), `hosted_camera_picture` (05c, hosted), `fit_pictures` (06-11), `room_pictures` (12-16), `flat_picture` (12_flat_placement); `MAX_LONG = 1600` |
 | `config.toml` | Shipped settings, every key commented; the only user interface | top keys + `[car_isolation]`, `[fit]`, optional `[scene.<name>]` |
 | `cars.json` | Car list: JSON array, cm (`carModel`, `length`, `width`, `height`, `WheelBase`, `body` suv/hatch/sedan) | EQB 2024, Baleno 2022; parsed by `bg_changer/cars.py` |
 | `requirements.txt` | Pins (Python 3.11): rembg[cpu] 2.0.86, onnxruntime 1.31.1, opencv-python-headless 5.0.0.93, numpy 2.4.6, pillow 13.0.0, scipy 1.17.1, pytest 9.2.0 | `pooch` (car_isolation downloads) arrives via rembg, not pinned |
@@ -30,7 +30,8 @@ Subpackages (own docs; internals not repeated here):
 - [car_isolation/](car_isolation/CLAUDE.md): optional YOLOX-s + SAM pass that keeps only the target car in the mask
 - [hosted/](hosted/CLAUDE.md): `[hosted]` (on in the shipped config): fal.ai BiRefNet + SAM 3 cut-out, glass tint,
   MoGe-3 + VGGT camera; `HostedRun` is created in `main()` after the output guard, replaces the local segmenter,
-  and is passed to stages 2-3 as `RoomRun.hosted`. `[hosted]` on turns `[car_isolation]` off for the run
+  and is passed to stages 2-3 as `RoomRun.hosted`. `[hosted]` on turns `[car_isolation]` off for the run.
+  `plates_masked` (plate gate) turns `[hosted]` off first when the images folder has no `detections.csv`
 - [background_scaler/](background_scaler/CLAUDE.md): shrink background + scene for small photos (flat placement only)
 - [tests/](tests/CLAUDE.md): model-free pytest suite
 
@@ -71,6 +72,9 @@ override config for one run: `--background NAME` (repeatable, or `all`), `--back
 
 Outputs: `<out>/<bg>/<photo>.webp`, `cutouts/<photo>.webp`, `results.csv`; debug: `debug/README.txt`,
 `debug/<photo>/01..11`, `debug/<photo>/<bg>/12..16`; flat mode keeps its overlay at `<bg>/debug/<photo>.jpg`.
+With `[hosted]`: `05a_glass_mask`/`05b_glass_tint` are drawn in stage 1 right after `hr.glass` (from the untinted
+image, held only for that call), `05c_hosted_camera` in stage 3 next to `fit_pictures` (from `Measured.external`,
+`fit.cam` and `photo.hosted`). Note `01_photo`/`05_cutout_result` show the tinted frame (the photo from then on).
 
 Tools (from `background_changer\`):
 - `.venv\Scripts\python tools\check_flat.py output\_baseline_flat output\_flat_check`: every baseline image exactly

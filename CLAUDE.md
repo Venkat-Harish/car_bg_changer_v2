@@ -25,6 +25,7 @@ frame_view_type>         .venv\Scripts\python classify_video.py
 number_plate_detection>  .venv\Scripts\python mask_plates.py
 background_changer>      .venv\Scripts\python change_background.py
 video_pipeline>          ..\background_changer\.venv\Scripts\python make_video.py
+video_pipeline>          ..\background_changer\.venv\Scripts\python e2e_steps.py   (test run, step report)
 ```
 
 Tests and checks:
@@ -57,6 +58,8 @@ photo folder ──────────────────────�
 
 video_pipeline/make_video.py: video ─► frames 00001.jpg ─► mask_plates.py ─► change_background.py
   --background-view room ─► mp4  (does not run frame_view_type, so its frames carry no view label)
+video_pipeline/e2e_steps.py: video ─► classify_video --pick-sides (one frame per side, <video>_sides) ─►
+  mask_plates ─► change_background --debug (all backgrounds) ─► output/e2e_<video>/index.html, every step pictured
 ```
 
 ## Code map
@@ -66,7 +69,7 @@ video_pipeline/make_video.py: video ─► frames 00001.jpg ─► mask_plates.p
   - [car_fit_to_bg/](background_changer/car_fit_to_bg/CLAUDE.md) — camera from background lines, 3D pose fit, levelling, room placement
   - [room3d/](background_changer/room3d/CLAUDE.md) — 3D room model and NumPy/OpenCV re-render from a new camera
   - [car_isolation/](background_changer/car_isolation/CLAUDE.md) — optional YOLOX-s + SAM pass that keeps only the target car in the mask
-  - [hosted/](background_changer/hosted/CLAUDE.md) — `[hosted]` (on by default): fal.ai BiRefNet + SAM 3 cut-out, glass tint, MoGe-3 + VGGT camera; needs `FAL_KEY`
+  - [hosted/](background_changer/hosted/CLAUDE.md) — `[hosted]` (on by default): fal.ai BiRefNet + SAM 3 cut-out, glass tint, MoGe-3 + VGGT camera; needs `FAL_KEY`. Privacy (DPDP): uploads only plate-masked folders (`detections.csv`), people pixelated in the uploaded copy, cache pruned after `keep_cache_days`
   - [background_scaler/](background_changer/background_scaler/CLAUDE.md) — shrinks background + scene for small photos (flat placement)
   - [tests/](background_changer/tests/CLAUDE.md) — model-free pytest suite, bit-exact car-pixel checks
 - [number_plate_detection/](number_plate_detection/CLAUDE.md) — entry point `mask_plates.py`, config, assets
@@ -75,8 +78,9 @@ video_pipeline/make_video.py: video ─► frames 00001.jpg ─► mask_plates.p
   - [tests/](number_plate_detection/tests/CLAUDE.md) — synthetic colour test set and its runner
 - [frame_view_type/](frame_view_type/CLAUDE.md) — `classify_video.py`: one frame every N s, 8-way side classifier
 - [video_pipeline/](video_pipeline/CLAUDE.md) — `make_video.py`: video → masked → new background → mp4
-- `docs/` — engineer write-ups only (markdown); their `file.py:NN` links are line-pinned and drift as code changes.
-  Each tool also keeps research notes in its own `docs/`.
+- `docs/` — the current flow step by step (`pipeline-steps.md`: what each step does, solves, takes and gives, with
+  pictures from the 24 Nov 2026 e2e run in `docs/images/`), `glossary.md`, and `ceo/` (the CEO PDF and its HTML
+  source). Pictures must show covered plates only. Each tool also keeps research notes in its own `docs/`.
 
 ## Rules that always hold
 1. **Car pixels are evidence.** The photos document vehicle condition, so dents and scratches must stay as shot.

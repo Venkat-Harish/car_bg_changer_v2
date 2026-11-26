@@ -29,7 +29,8 @@ VGGT, `fal-ai/vggt-1b` (https://fal.ai/models/fal-ai/vggt-1b/llms.txt), $0.00097
 $0.001 per frame):
 - input: `image_urls` (list; frames "padded to a square and resized so the longest side is 518 pixels"),
   `video_url`, `frame_sampling_rate`, `alpha_blend_onto` (keep|white|black|mean), `export_prediction_data`,
-  `export_depth_maps`, `export_point_cloud` (all true by default; we turn them off), `array_encoding`,
+  `export_depth_maps`, `export_point_cloud` (all true by default; at least one must stay on or fal answers 422,
+  so we keep only `export_prediction_data`), `array_encoding`,
   `exclude_keys`, `confidence_percentile`, `max_points`, `enable_safety_checker`. No mask input: we paint the
   (dilated) car mid-grey before sending, because shiny paint and glass hurt the multi-view solve.
 - output: `num_frames`, `depth_range`, `extrinsics` (per frame 3x4 "camera-from-world", OpenCV axes x right, y down,
@@ -299,8 +300,10 @@ def vggt_car(client: FalClient, images: list[np.ndarray], car_masks: list[np.nda
     if not images:
         return []
     sent = [_grey_car(im, mk) for im, mk in zip(images, car_masks)]
+    # fal refuses (HTTP 422) unless at least one export is on; prediction data is the cheapest (JSON files we never
+    # fetch). extrinsics/intrinsics come top-level either way (checked live 2026-11-24).
     out = client.run(VGGT_ENDPOINT, {"export_point_cloud": False, "export_depth_maps": False,
-                                     "export_prediction_data": False},
+                                     "export_prediction_data": True},
                      images={"image_urls": sent}, cost=VGGT_USD_PER_FRAME * len(images), max_side=max_side)
     E = out.get("extrinsics") or []
     Ks = out.get("intrinsics") or []

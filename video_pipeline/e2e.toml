@@ -1,0 +1,24 @@
+# Settings for e2e_steps.py: one end-to-end test run with a picture for every step.
+# Run from the video_pipeline folder:
+#     ..\background_changer\.venv\Scripts\python e2e_steps.py
+# Relative paths are relative to this folder (video_pipeline).
+
+# The input video (a walk-around of one car).
+video = "../frame_view_type/sample_vid.mp4"
+
+# Seconds between the frames frame_view_type samples. Small values give it more frames to pick each side from.
+every_seconds = 0.5
+
+# carModel in background_changer/cars.json.
+car = "Maruti Suzuki Baleno 2022"
+
+# Background names from background_changer/backgrounds (file name without extension), or ["all"].
+backgrounds = ["all"]
+
+# Hosted models on fal.ai (cut-out, SAM 3, glass tint, MoGe-3 + VGGT camera): true, false, or "config" to use
+# whatever background_changer/config.toml says. Costs about $0.04 per photo; reruns come from the cache for $0.
+hosted = true
+
+# Work and report folder: <output>/e2e_<video name>/ with index.html (the step-by-step report), plates/, masked/,
+# background/ and run.log.
+output = "output"

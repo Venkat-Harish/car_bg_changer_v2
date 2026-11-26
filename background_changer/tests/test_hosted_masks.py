@@ -119,6 +119,18 @@ def test_birefnet_alpha_ignores_colours_of_an_rgba_cutout():
     assert np.array_equal(birefnet_alpha(fake, noise()) >= 0.5, target)
 
 
+def test_birefnet_empty_mask_is_a_fal_error():
+    """fal's "Light 2K" returned all-black masks live; that must fall back to the local model, not skip the photo."""
+    import pytest
+
+    from hosted.fal import FalError
+
+    fake = FakeFal({BIREFNET_ENDPOINT: lambda p, i: {"image": {"url": "mem://empty.png"}}})
+    fake.add_file("mem://empty.png", np.zeros((H // 2, W // 2), np.uint8))
+    with pytest.raises(FalError):
+        birefnet_alpha(fake, noise())
+
+
 # ---------------------------------------------------------------- isolation
 
 def test_isolator_picks_the_blob_car_and_removes_the_neighbour():

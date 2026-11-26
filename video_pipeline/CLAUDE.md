@@ -7,6 +7,8 @@ Orchestrator only, with no README and no venv of its own. It runs on background_
 | File | Role | Key types / entry points |
 |---|---|---|
 | `make_video.py` | Four-stage driver with per-stage resume | `main()`, `load_config()`, `extract()`, `run()`, `py()`, `fit_to_canvas()`, `images()` |
+| `e2e_steps.py` | End-to-end test run with a picture per step: frame_view_type `--pick-sides` → mask_plates → change_background (room, `--debug`, every background) → `index.html` report | `main()`, `load_config()`, `run()` (tees to `run.log`), `build_report()`, `plate_picture()`, `STEP_TEXT` |
+| `e2e.toml` | Its settings, validated (unknown keys rejected): `video`, `every_seconds` (0.5), `car`, `backgrounds` (["all"]), `hosted` (true/false/"config"), `output` | — |
 | `config.toml` | Settings | required: `video` (`../frame_view_type/sample_vid.mp4`), `car` (`Maruti Suzuki Baleno 2022`, a `carModel` in `background_changer/cars.json`), `background` (`background_1`). Optional (code default in brackets; values in `config.toml`): `fps` [5], `output_fps` ["source"], `max_seconds` [0; 10 in config], `max_frames` [0], `brightness_smoothing` [5], `output` ["output"] |
 
 Run it with `..\background_changer\.venv\Scripts\python make_video.py`. `run.log` and `output/` are local and gitignored.
@@ -31,6 +33,16 @@ The work dir `W` is `<output>/<video stem>/`.
 
 `run()` prints the full command line and exits with `stage failed: <script>` on a non-zero return code. `py(tool)` returns `tool/.venv/Scripts/python.exe` if it exists, and otherwise falls back silently to `sys.executable`.
 
+**e2e_steps.py** (`..\background_changer\.venv\Scripts\python e2e_steps.py [--report-only]`): work dir
+`<output>/e2e_<video stem>/`, deleted and redone on every full run, as is `frame_view_type/output/<stem>/` (stale
+frames). Only `W/background/_hosted_cache/` survives (moved aside and back), so a rerun on the same frames costs $0.
+First full run (2026-11-24, hosted, 3 backgrounds): 6 sides, ~700 s, 37 fal calls, about $0.23. The images folder is `<stem>_sides`, so background_changer reads `frame_view_type/output/<stem>_sides/results.csv`
+as the view prior (unlike make_video's `frames`). Masked frames: `W/masked/<stem>_sides/`; results and debug pictures:
+`W/background/<stem>_sides/`. The report links into those folders (and into frame_view_type's output) by relative
+paths, copying nothing except `W/plates/<photo>.jpg` (masked frame + detector box + corners, report only). Step
+times go to `step_times.csv`; the fal spend line is read back from `run.log`. Each tool needs its own `.venv` (no
+silent fallback here). No mp4: a handful of stills is not a video.
+
 ## Invariants & gotchas
 - **Frames named `00001.jpg` carry no view label.** Room mode then looks for `frame_view_type/output/frames/results.csv`, which doesn't exist, so every frame is flagged `no-view-label` and yaw comes from the fit alone. That is expected: frame_view_type is not part of this pipeline.
 - **`fit_to_canvas` is the only image operation allowed after background_changer.** It is one uniform `INTER_AREA` resize of the whole finished frame, plus a black letterbox. Never add colour, sharpening or any other per-car edit here: car pixels are evidence ([../CLAUDE.md](../CLAUDE.md), rule 1; [../background_changer/CLAUDE.md](../background_changer/CLAUDE.md)). It also enlarges results smaller than the canvas, and an odd-sized first result is shrunk by up to 1 px.
@@ -52,4 +64,4 @@ The work dir `W` is `<output>/<video stem>/`.
 - **Several backgrounds:** loop stages 3 and 4 over the names, giving each its own `result_dir` and mp4.
 
 ## Tests
-None. The engineer write-up is [../docs/video_pipeline/README.md](../docs/video_pipeline/README.md).
+None. The step-by-step write-up of the e2e flow (and of this variant) is [../docs/pipeline-steps.md](../docs/pipeline-steps.md).

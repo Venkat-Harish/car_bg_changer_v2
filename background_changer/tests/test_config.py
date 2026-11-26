@@ -158,16 +158,21 @@ glass_tint = false
 tint_keep = 0.3
 max_cost_per_car = 0
 max_side = 0
+blur_people = false
+keep_cache_days = 0
 """))
     h = cfg["hosted"]
     assert (h["enabled"], h["glass_tint"], h["tint_keep"], h["max_cost_per_car"], h["max_side"]) == (True, False, 0.3, 0, 0)
     assert h["cutout"] is True and h["timeout_s"] == 120  # defaults filled in
+    assert h["blur_people"] is False and h["keep_cache_days"] == 0 and h["require_masked_plates"] is True
 
 
 @pytest.mark.parametrize("bad", ['hosted = 1', '[hosted]\nenabled = "yes"', '[hosted]\nvggt = 1',
                                  '[hosted]\ntint_strength = 1.5', '[hosted]\ntint_keep = -0.1',
                                  '[hosted]\nmax_cost_per_car = -1', '[hosted]\ntimeout_s = 0', '[hosted]\nmax_side = 100',
-                                 '[hosted]\nmax_side = 1024.0', '[hosted]\napi_key = "x"'])
+                                 '[hosted]\nmax_side = 1024.0', '[hosted]\napi_key = "x"',
+                                 '[hosted]\nblur_people = 1', '[hosted]\nrequire_masked_plates = "no"',
+                                 '[hosted]\nkeep_cache_days = -1', '[hosted]\nkeep_cache_days = true'])
 def test_bad_hosted_values_are_rejected(tmp_path, bad):
     with pytest.raises(SystemExit):
         cb.load_config(write_config(tmp_path, bad + "\n"))

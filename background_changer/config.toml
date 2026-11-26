@@ -188,5 +188,18 @@ vggt = true
 # dollars. 0 = no limit.
 max_cost_per_car = 3.0
 
+# Privacy (India's DPDP Act: send the processor only what the job needs). These settings are about what leaves
+# the laptop; the photos on disk and every output stay exactly as before.
+#   require_masked_plates: send nothing unless the images folder is number_plate_detection's output (it holds
+#     detections.csv), so every number plate is covered first. Otherwise the run uses the laptop-only path.
+#     Set false only for photos that hold no plates.
+#   blur_people: pixelate every person (bystanders, a driver behind the glass) in the copy sent to fal.ai, found
+#     with car_isolation's YOLOX-s on the laptop. Tiny far-away figures can be missed.
+#   keep_cache_days: delete cached fal answers (output\_hosted_cache\) older than this many days at the start of a
+#     run. 0 = keep forever. The untouched photos in output\<folder>\originals\ follow your own retention policy.
+require_masked_plates = true
+blur_people = true
+keep_cache_days = 30
+
 timeout_s = 120        # seconds to wait for one fal request
 max_side = 2048        # photos are sent at most this many px on the long side (0 = full size); masks come back at full size

@@ -166,7 +166,7 @@ def test_vggt_relative_yaw_and_focal():
         assert cam.conf > 0.7
     endpoint, payload, sent = fake.calls[0]
     assert endpoint == VGGT_ENDPOINT and len(sent["image_urls"]) == len(YAWS)
-    assert payload["export_point_cloud"] is False
+    assert payload["export_point_cloud"] is False and payload["export_prediction_data"] is True  # fal: 422 if all off
     car = masks[1] > 0
     assert (sent["image_urls"][1][car] == 128).all()  # the car is greyed out before sending
     assert (sent["image_urls"][1][~cv2.dilate(masks[1], np.ones((101, 101), np.uint8)).astype(bool)] == 200).all()

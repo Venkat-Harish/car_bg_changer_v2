@@ -91,9 +91,12 @@ class Spend:
 
 class FalClient:
     def __init__(self, key: str | None, cache_dir: Path | None = None, timeout: float = 120.0,
-                 max_cost: float = 0.0, poll_s: float = 0.5, session=None, offline: bool = False):
-        """max_cost 0 = no limit. offline=True serves only the cache (tests, reruns) and raises FalError on a miss."""
+                 max_cost: float = 0.0, poll_s: float = 0.5, session=None, offline: bool = False, redact=None):
+        """max_cost 0 = no limit. offline=True serves only the cache (tests, reruns) and raises FalError on a miss.
+        redact: callable(BGR ndarray) -> ndarray applied to every image before it is encoded (and so before the
+        cache key and any upload); hosted.redact.PeopleRedactor blurs people. Masks and bytes pass through."""
         self._key = key
+        self.redact = redact
         self.cache_dir = Path(cache_dir) if cache_dir else None
         self.timeout = timeout
         self.max_cost = max_cost
@@ -115,7 +118,10 @@ class FalClient:
         for this call (e.g. per-frame models). Results are cached on disk."""
         payload = dict(payload or {})
         images = images or {}
-        encoded = {k: ([self._enc(i, image_format, max_side) for i in v] if isinstance(v, list)
+        if self.redact is not None:
+            images = {k: ([self.redact(i) for i in v] if isinstance(v, list) else self.redact(v))
+                      for k, v in images.items()}
+        encoded ={k: ([self._enc(i, image_format, max_side) for i in v] if isinstance(v, list)
                        else self._enc(v, image_format, max_side)) for k, v in images.items()}
         key = self._cache_key(endpoint, payload, encoded)
         hit = self._cache_get(key + ".json")
@@ -138,6 +144,19 @@ class FalClient:
         self.spend.by_endpoint[endpoint] = round(self.spend.by_endpoint.get(endpoint, 0.0) + est, 4)
         self._cache_put(key + ".json", json.dumps(result).encode())
         return result
+
+    def prune_cache(self, days: float, now: float | None = None) -> int:
+        """Delete cache files older than `days` (by modification time); returns how many. Retention for data that
+        left the laptop: the cache holds fal's answers (masks, point clouds), keyed by what was sent."""
+        if not self.cache_dir or days <= 0 or not self.cache_dir.is_dir():
+            return 0
+        cutoff = (time.time() if now is None else now) - days * 86400
+        n = 0
+        for p in self.cache_dir.iterdir():
+            if p.is_file() and p.stat().st_mtime < cutoff:
+                p.unlink(missing_ok=True)
+                n += 1
+        return n
 
     def fetch_bytes(self, url: str) -> bytes:
         """Bytes of a result file (cached by URL). data: URIs are decoded locally."""

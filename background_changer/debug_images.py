@@ -10,6 +10,11 @@ numbers, and what each colour means.
                              removed (car_isolation), window holes filled, the soft edge band
   04_cutout_isolation.jpg    (car_isolation on) the car SAM found, other vehicles and what was removed
   05_cutout_result.jpg       the final mask and the car alone on a checkerboard (what gets pasted)
+ [hosted] on:
+  05a_glass_mask.jpg         SAM 3's window mask on the photo: the only pixels the glass tint may change
+  05b_glass_tint.jpg         the photo before and after the tint, and the changed pixels outlined
+  05c_hosted_camera.jpg      (room mode) the MoGe-3 + VGGT camera: focal, pitch, roll, height, angle between shots,
+                             its horizon, and which camera the 3D fit used
  room mode (background_view = "room"):
   06_camera_lines.jpg        the camera's tilt from the background's straight lines: segments by direction,
                              vanishing directions, the horizon from the lines and from the car's 3D fit
@@ -299,6 +304,84 @@ def cutout_pictures(dw: DebugWriter, stem: str, image: np.ndarray, raw: np.ndarr
             [f"car box {car.box[2] - car.box[0]} x {car.box[3] - car.box[1]} px at ({car.box[0]}, {car.box[1]}); "
              f"touches the photo edge: {cut}",
              "This is what gets pasted: the car's own pixels, nothing re-coloured."])
+
+
+# ---------------------------------------------------------------- [hosted]: glass tint (05a, 05b), camera (05c)
+def glass_pictures(dw: DebugWriter, stem: str, before: np.ndarray, after: np.ndarray, window: np.ndarray | None,
+                   car_alpha: np.ndarray, glass_pct=None) -> None:
+    """05a: SAM 3's window mask on the photo; 05b: the photo before and after the tint, cropped to the car."""
+    if window is None:
+        return
+    t = thick(before.shape)
+    car = car_alpha >= 0.5
+    over = (before.astype(np.float32) * 0.6).astype(np.uint8)
+    paint(over, window, CYAN, 0.6)
+    outline(over, window, CYAN, t)
+    outline(over, car, GREEN, t)
+    pct = glass_pct if glass_pct not in (None, "") else (100.0 * window.sum() / max(1, car.sum()))
+    dw.save(stem, "05a_glass_mask", over, "5a. Glass found by SAM 3 (\"car window\" + \"windshield\")",
+            [f"glass = {float(pct):.1f}% of the car's area; kept only inside the car mask, a little in from its edge",
+             ("cyan = the window mask: the only pixels the tint may change", CYAN),
+             ("green = the car's outline", GREEN)]
+            + (["no glass found: the photo is used untouched"] if not window.any() else []))
+    if not window.any():
+        return
+    changed = np.any(before != after, axis=2)
+    x1, y1, x2, y2 = box_of(car, 0.04)
+    b, a = before[y1:y2, x1:x2].copy(), after[y1:y2, x1:x2].copy()
+    marked = a.copy()
+    outline(marked, changed[y1:y2, x1:x2], MAGENTA, t)
+    outside = int((changed & ~window).sum())
+    dw.save(stem, "05b_glass_tint", side_by_side(b, a, marked),
+            "5b. Glass tint: the photo (left), tinted (middle), changed pixels outlined (right)",
+            [f"{int(changed.sum())} pixels changed, {outside} of them outside the window mask (must be 0)",
+             "A fixed dark blue-grey gradient, the same on every photo of the car: nothing measured or generated.",
+             "From here on the tinted frame is the photo; the untouched file is in originals\\.",
+             ("magenta = outline of the changed pixels", MAGENTA)])
+
+
+def hosted_camera_picture(dw: DebugWriter, stem: str, frame: np.ndarray, alpha: np.ndarray, ext, fit,
+                          cols: dict | None = None) -> None:
+    """05c: the hosted camera (MoGe-3 per photo + VGGT over the folder) and which camera the fit used."""
+    H, W = alpha.shape
+    t = thick(frame.shape)
+    c = ((W - 1) / 2, (H - 1) / 2)
+    img = (frame.astype(np.float32) * 0.55).astype(np.uint8)
+    paint(img, alpha >= 0.5, (90, 90, 90), 0.6)
+
+    def horizon(roll, pitch, f, colour):
+        if roll is None or pitch is None or not f:
+            return False
+        r, p = math.radians(roll), math.radians(pitch)
+        y_h = c[1] - f * math.tan(p)
+        line_through(img, (math.tan(r), 1.0, -(y_h + c[0] * math.tan(r))), colour, t)
+        return True
+
+    cols = cols or {}
+    lines = []
+    if ext is None:
+        lines.append("no hosted camera for this photo (MoGe-3 / VGGT failed or off): the background lines alone")
+    else:
+        f = ext.f_px or fit.f
+        drew = horizon(ext.roll, ext.pitch, f, MAGENTA)
+        fmt = lambda v, s: "-" if v is None else s.format(v)  # noqa: E731
+        lines += [f"hosted: focal {fmt(ext.f_px, '{:.0f}')} px, pitch {fmt(ext.pitch, '{:+.2f}')} deg, roll "
+                  f"{fmt(ext.roll, '{:+.2f}')} deg, camera height {fmt(ext.height_m, '{:.2f}')} m (MoGe-3 floor), "
+                  f"angle from the first shot {fmt(ext.rel_yaw_deg, '{:.0f}')} deg (VGGT), confidence {ext.conf:.2f}",
+                  f"MoGe-3 alone: focal {cols.get('moge_f') or '-'} px, height {cols.get('moge_h') or '-'} m; "
+                  f"VGGT solve: {cols.get('vggt_ok') or '-'}"]
+        if drew:
+            lines.append(("magenta = horizon from the hosted camera", MAGENTA))
+    cam = fit.cam
+    horizon(cam.roll, cam.pitch, fit.f, CYAN)
+    used = {"hosted": "the hosted camera", "lines": "this photo's own background lines (they disagreed with the "
+            "hosted one by more than 5 deg: camera-lines-fallback)" if "camera-lines-fallback" in cam.flags
+            else "this photo's own background lines", "neighbours": "neighbouring frames",
+            "none": "no camera: the car's outline alone"}.get(cam.source, cam.source)
+    lines += [f"the 3D fit used: {used}; focal {fit.f:.0f} px from {FOCAL_SOURCE.get(fit.focal_source, fit.focal_source)}",
+              f"fitted camera height {fit.pose.h:.2f} m",
+              ("cyan = horizon of the camera the fit used (on top of magenta when the hosted camera won)", CYAN)]
+    dw.save(stem, "05c_hosted_camera", img, "5c. Camera from the hosted models (MoGe-3 + VGGT)", lines)
 
 
 # ---------------------------------------------------------------- steps 6-11: camera, 3D fit, level, tyres
@@ -607,4 +690,5 @@ def flat_picture(dw: DebugWriter, stem: str, bg: str, overlay: np.ndarray, plan)
              "flags: " + (", ".join(plan.flags) or "none")], bg=bg)
 
 
-__all__ = ["DebugWriter", "cutout_pictures", "fit_pictures", "flat_picture", "room_pictures"]
+__all__ = ["DebugWriter", "cutout_pictures", "fit_pictures", "flat_picture", "glass_pictures",
+           "hosted_camera_picture", "room_pictures"]

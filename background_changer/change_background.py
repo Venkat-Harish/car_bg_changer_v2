@@ -66,7 +66,8 @@ try:
     from car_fit_to_bg.batch import skip_reason as room_skip_reason
     from car_fit_to_bg.lines import LineCamera
     from car_fit_to_bg.rooms import GENERIC_BACKDROP_ROWS, room_for
-    from debug_images import DebugWriter, cutout_pictures, fit_pictures, flat_picture, room_pictures
+    from debug_images import (DebugWriter, cutout_pictures, fit_pictures, flat_picture, glass_pictures,
+                              hosted_camera_picture, room_pictures)
 except ImportError as exc:  # usually: started with the system Python instead of .venv
     sys.exit(f"Missing package: {exc.name or exc}.\n{VENV_HINT}")
 
@@ -82,13 +83,15 @@ CONFIG_KEYS = (*PATH_KEYS, "background", "car", "cut_frames", "debug_mode", "mod
                "edge_shrink", "quality", "save_cutouts", "background_scale", "background_min_width", "scene",
                "background_view", "max_output_size", "keep_background_sharp", "fit", "car_isolation", "hosted")
 ISOLATION_KEYS = ("enabled", "min_score", "remove_objects")
-ISOLATION_CSV_FIELDS = ["isolation", "isolate_s"]  # appended only when car_isolation is on
+ISOLATION_CSV_FIELDS = ["isolation", "isolate_s"]  # appended only when car_isolation or [hosted] is on
 # [hosted]: Idea B, hosted open models on fal.ai (hosted/, docs/glass-cutout-camera-options.md set-up B)
-HOSTED_BOOL_KEYS = ("enabled", "cutout", "glass_tint", "camera", "vggt")
-HOSTED_KEYS = (*HOSTED_BOOL_KEYS, "tint_strength", "tint_keep", "max_cost_per_car", "timeout_s", "max_side")
+HOSTED_BOOL_KEYS = ("enabled", "cutout", "glass_tint", "camera", "vggt", "require_masked_plates", "blur_people")
+HOSTED_KEYS = (*HOSTED_BOOL_KEYS, "tint_strength", "tint_keep", "max_cost_per_car", "timeout_s", "max_side",
+               "keep_cache_days")
 HOSTED_DEFAULTS = {"enabled": False, "cutout": True, "glass_tint": True, "camera": True, "vggt": True,
+                   "require_masked_plates": True, "blur_people": True,
                    "tint_strength": 0.85, "tint_keep": 0.15, "max_cost_per_car": 3.0, "timeout_s": 120,
-                   "max_side": 2048}
+                   "max_side": 2048, "keep_cache_days": 30}
 HOSTED_CSV_FIELDS = ["hosted", "sam3_status", "glass_pct", "camera_source", "moge_f", "moge_h", "vggt_ok",
                      "cost_usd"]  # appended only when [hosted] is on
 MIN_WIDTH_FLOOR = 64  # smallest allowed background_min_width
@@ -220,8 +223,9 @@ def parse_isolation(table, path: Path) -> dict:
 
 
 def parse_hosted(table, path: Path) -> dict:
-    """[hosted] enabled/cutout/glass_tint/camera/vggt = bool; tint_strength, tint_keep = 0..1;
-    max_cost_per_car >= 0 (0 = no limit); timeout_s > 0; max_side = 0 or >= 256 px. Returns the full settings
+    """[hosted] enabled/cutout/glass_tint/camera/vggt/require_masked_plates/blur_people = bool; tint_strength,
+    tint_keep = 0..1; max_cost_per_car >= 0 (0 = no limit); timeout_s > 0; max_side = 0 or >= 256 px;
+    keep_cache_days >= 0 (0 = keep forever). Returns the full settings
     (defaults filled in)."""
     where = f"[hosted] in {path}"
     if not isinstance(table, dict):
@@ -243,7 +247,17 @@ def parse_hosted(table, path: Path) -> dict:
         v = table["max_side"]
         if isinstance(v, bool) or not isinstance(v, int) or (v != 0 and v < 256):
             raise SystemExit(f"{where}: 'max_side' must be a whole number of pixels, 256 or more (0 = full size)")
+    if "keep_cache_days" in table and not (is_number(table["keep_cache_days"]) and table["keep_cache_days"] >= 0):
+        raise SystemExit(f"{where}: 'keep_cache_days' must be a number of days, 0 or more (0 = keep forever)")
     return {**HOSTED_DEFAULTS, **table}
+
+
+def plates_masked(input_dir: Path, hosted_cfg: dict) -> bool:
+    """[hosted] plate gate: photos may go to fal.ai only once number_plate_detection has covered their plates,
+    which leaves a detections.csv in the folder it writes (or when require_masked_plates = false)."""
+    if not hosted_cfg.get("require_masked_plates", True):
+        return True
+    return (input_dir / "detections.csv").is_file()
 
 
 def check_background_choice(value, where: str) -> list[str]:
@@ -390,6 +404,14 @@ def prepare_photo(path: Path, image: np.ndarray, car: CarMask, table: CarTable, 
     info = parse_name(path.stem)
     probe = probe_car(car)
     return Photo(path, image, car, box, info, probe, estimate_yaw(info, probe, table), t_seg)
+
+
+def results_fields(view: str, isolate: bool, hosted: bool) -> list[str]:
+    """results.csv columns. [hosted] isolates too (SAM 3, with [car_isolation] itself off), so its rows carry the
+    isolation columns as well; without them csv.DictWriter raises at the very end and the CSV is lost."""
+    return ((ROOM_CSV_FIELDS if view == "room" else CSV_FIELDS)
+            + (ISOLATION_CSV_FIELDS if isolate or hosted else [])
+            + (HOSTED_CSV_FIELDS if hosted else []))
 
 
 def isolation_cols(photo: Photo) -> dict:
@@ -698,6 +720,8 @@ def place_room_photos(photos: list[Photo], run: Run, rr: RoomRun, rows: list[dic
         dw = DebugWriter(run.out_dir / "debug") if run.debug else None
         if dw is not None:
             info = photo.info
+            if rr.hosted is not None:
+                debug_step(hosted_camera_picture, dw, photo.path.stem, frame, alpha, m.external, fit, photo.hosted)
             debug_step(fit_pictures, dw, photo.path.stem, frame, alpha, fit, info.label if info else None,
                        BIN_DEG.get(info.label) if info else None)
         del frame, alpha
@@ -862,6 +886,14 @@ def main() -> None:
     isolate = args.isolate if args.isolate is not None else iso_cfg.get("enabled", False)
     hosted_cfg = cfg.get("hosted", HOSTED_DEFAULTS)
     hosted = args.hosted if args.hosted is not None else hosted_cfg.get("enabled", False)
+    if hosted and source is not None:
+        src_dir = (source if source.is_dir() else source.parent).resolve()
+        if not plates_masked(src_dir, hosted_cfg):
+            print(f"[hosted] is OFF for this run: {src_dir} has no detections.csv, so its number plates were not "
+                  "covered by number_plate_detection (mask_plates.py) and the photos must not be sent to fal.ai. "
+                  "Run mask_plates.py first and use its output folder, or set [hosted] require_masked_plates = "
+                  "false if these photos hold no plates. Continuing with the laptop-only path.")
+            hosted = False
     if hosted and isolate:
         print("note: [hosted] is on, so SAM 3 keeps only this car; [car_isolation] is not used in this run")
         isolate = False
@@ -1056,7 +1088,12 @@ def main() -> None:
                 continue
             frame_path = None
             if hr is not None:  # glass tint: the only change to the car's pixels, inside the window mask only
-                image, frame_path, _ = hr.glass(path, image, car.alpha)
+                untinted = image
+                image, frame_path, window = hr.glass(path, image, car.alpha)
+                if dw is not None:
+                    debug_step(glass_pictures, dw, path.stem, untinted, image, window, car.alpha,
+                               hr.cols(path.stem).get("glass_pct"))
+                del untinted, window
             t_seg = time.perf_counter() - t0
             t_seg_total += t_seg
             n_done += 1
@@ -1115,9 +1152,7 @@ def main() -> None:
             if view == "room":
                 file_order(rows, images, loaded)
             with open(out_dir / "results.csv", "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=(ROOM_CSV_FIELDS if view == "room" else CSV_FIELDS)
-                                        + (ISOLATION_CSV_FIELDS if isolate else [])
-                                        + (HOSTED_CSV_FIELDS if hr is not None else []), restval="")
+                writer = csv.DictWriter(f, fieldnames=results_fields(view, isolate, hr is not None), restval="")
                 writer.writeheader()
                 writer.writerows(rows)
     elapsed = time.perf_counter() - t_start
@@ -1143,6 +1178,9 @@ def main() -> None:
         sp = hr.client.spend
         billed = ", ".join(f"{k} ${v:.2f}" for k, v in sp.by_endpoint.items()) or "nothing billed"
         print(f"hosted: {sp.calls} fal call(s), {sp.cached} from the cache, about ${sp.usd:.2f} ({billed})")
+        red = getattr(hr.client, "redact", None)
+        if red is not None and hasattr(red, "people"):
+            print(f"hosted privacy: {red.people} person box(es) blurred over {red.images} image(s) before upload")
     print(f"saved to {out_dir}")
 
 

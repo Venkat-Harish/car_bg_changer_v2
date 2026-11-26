@@ -87,9 +87,19 @@ class HostedRun:
             if not key:
                 raise SystemExit("[hosted] enabled = true needs a fal.ai key: set the FAL_KEY environment variable or "
                                  f"put FAL_KEY=... in {env_file} (or set [hosted] enabled = false)")
+            redact = None
+            if settings.get("blur_people", True):
+                from .redact import PeopleRedactor
+
+                redact = PeopleRedactor(threads=(local_args[2] if len(local_args) > 2 else 0) or 4)
             client = FalClient(key, cache_dir=cache_dir, timeout=float(settings["timeout_s"]),
-                               max_cost=float(settings["max_cost_per_car"]))
+                               max_cost=float(settings["max_cost_per_car"]), redact=redact)
         self.client = client
+        days = settings.get("keep_cache_days", 0)
+        if days and hasattr(client, "prune_cache"):
+            n = client.prune_cache(days)
+            if n:
+                print(f"hosted: removed {n} cached fal result(s) older than {days:g} day(s) (keep_cache_days)")
         self.segmenter = HostedSegmenter(client, edge_shrink, local_args, settings["max_side"], settings["cutout"])
         from .masks import HostedIsolator
 

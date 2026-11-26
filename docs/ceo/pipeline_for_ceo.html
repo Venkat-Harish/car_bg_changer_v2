@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>From walk-around video to studio shots: how the car photo pipeline works</title>
+<style>
+  @page { size: A4 landscape; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    color: #1d2433;
+    font-size: 10.5pt;
+    line-height: 1.38;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    background: #e9ecf1;
+  }
+  .page {
+    width: 297mm; height: 210mm;
+    padding: 11mm 14mm 9mm;
+    position: relative; overflow: hidden;
+    background: #fff;
+    page-break-after: always; break-after: page;
+    display: flex; flex-direction: column;
+  }
+  .page:last-child { page-break-after: auto; break-after: auto; }
+  @media screen { .page { margin: 8mm auto; box-shadow: 0 2px 10px rgba(0,0,0,.15); } }
+
+  h1, h2, h3 { margin: 0; font-weight: 600; }
+  p { margin: 0 0 2.2mm; }
+  ul { margin: 0; padding-left: 4.5mm; }
+  li { margin-bottom: 1.2mm; }
+  b, strong { font-weight: 600; }
+  .muted { color: #5b6478; }
+
+  /* running footer */
+  .foot {
+    position: absolute; left: 14mm; right: 14mm; bottom: 5mm;
+    display: flex; justify-content: space-between;
+    font-size: 8pt; color: #8a92a6;
+    border-top: 0.3mm solid #e1e5ec; padding-top: 1.5mm;
+  }
+
+  /* step header */
+  .sh { display: flex; align-items: center; gap: 5mm; margin-bottom: 4mm; flex: 0 0 auto; }
+  .num {
+    flex: 0 0 auto; min-width: 17mm; height: 17mm; padding: 0 3mm;
+    border-radius: 4mm; background: #17325c; color: #fff;
+    font-size: 17pt; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .sh h2 { font-size: 19pt; color: #17325c; line-height: 1.15; }
+  .sh .lead { margin: 1mm 0 0; color: #5b6478; font-size: 10.5pt; }
+  .where { display: inline-block; font-size: 8pt; font-weight: 600; padding: .4mm 2mm; border-radius: 2mm; margin-left: 2mm; vertical-align: 1mm; }
+  .where.laptop { background: #e4efe6; color: #24683a; }
+  .where.fal { background: #fdeedd; color: #9a5512; }
+
+  /* step body: pictures left, four boxes right */
+  .body { flex: 1 1 auto; min-height: 0; margin-bottom: 7mm;
+          display: grid; grid-template-columns: 1fr 104mm; gap: 6mm; }
+  .figs { display: flex; gap: 4mm; min-height: 0; min-width: 0; }
+  figure { margin: 0; flex: 1 1 0; min-width: 0; min-height: 0;
+           display: flex; flex-direction: column; }
+  figure .img { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center;
+                background: #f3f5f8; border-radius: 2mm; padding: 1.5mm; }
+  figure img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; border-radius: 1mm; }
+  figcaption { flex: 0 0 auto; font-size: 8.5pt; color: #5b6478; margin-top: 1.5mm; line-height: 1.3; }
+
+  .boxes { display: flex; flex-direction: column; gap: 2.6mm; min-height: 0; }
+  .box { border-radius: 2mm; padding: 2.4mm 3.5mm 2mm; border-left: 1.6mm solid; flex: 1 1 auto; }
+  .box h3 { font-size: 8.5pt; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 1mm; }
+  .box p, .box li { font-size: 9.6pt; }
+  .box p:last-child { margin-bottom: 0; }
+  .box ul li:last-child { margin-bottom: 0; }
+  .b-do  { background: #eef3fb; border-color: #2f5fa7; } .b-do h3  { color: #2f5fa7; }
+  .b-why { background: #fdf3ea; border-color: #d27a1f; } .b-why h3 { color: #b0620f; }
+  .b-in  { background: #f1f2f5; border-color: #7a8396; } .b-in h3  { color: #555e72; }
+  .b-out { background: #ecf6ef; border-color: #2e8a4c; } .b-out h3 { color: #24703d; }
+
+  /* wide layout: picture across the top, boxes in a row below */
+  .body.wide { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+  .body.wide .boxes { flex-direction: row; }
+  .body.wide .box { flex: 1 1 0; }
+
+  .note { font-size: 8.8pt; color: #5b6478; background: #fafbfc; border: 0.3mm dashed #c9cfda;
+          border-radius: 2mm; padding: 1.6mm 3mm; margin-top: 0; }
+
+  /* cover */
+  .cover { background: #17325c; color: #fff; padding: 0; flex-direction: row; }
+  .cover .left { flex: 1 1 auto; padding: 22mm 14mm 16mm 20mm; display: flex; flex-direction: column; }
+  .cover .kicker { font-size: 10pt; letter-spacing: .14em; text-transform: uppercase; color: #9fb6da; margin-bottom: 6mm; }
+  .cover h1 { font-size: 34pt; line-height: 1.08; font-weight: 700; margin-bottom: 7mm; }
+  .cover .sub { font-size: 13.5pt; color: #d6e0f0; max-width: 135mm; line-height: 1.45; }
+  .cover .facts { margin-top: auto; display: flex; gap: 8mm; }
+  .cover .facts div { border-top: 0.6mm solid #4f74ad; padding-top: 2mm; font-size: 9.5pt; color: #c3d1e8; max-width: 44mm; }
+  .cover .facts b { display: block; font-size: 15pt; color: #fff; font-weight: 600; }
+  .cover .right { flex: 0 0 128mm; background: #0f2342; display: flex; flex-direction: column;
+                  align-items: center; justify-content: center; padding: 12mm; }
+  .cover .right img { width: 100%; border-radius: 2mm; }
+  .cover .right p { color: #9fb6da; font-size: 9pt; margin-top: 3mm; text-align: center; }
+  .cover .date { font-size: 9pt; color: #9fb6da; margin-top: 6mm; }
+
+  /* section pages */
+  .title { font-size: 22pt; color: #17325c; margin-bottom: 1.5mm; }
+  .subtitle { color: #5b6478; font-size: 11pt; margin-bottom: 6mm; }
+  .cols { display: grid; gap: 8mm; flex: 1 1 auto; min-height: 0; margin-bottom: 7mm; }
+  .card { border-radius: 2.5mm; padding: 4mm 5mm; background: #f4f6f9; }
+  .card h3 { font-size: 12pt; color: #17325c; margin-bottom: 2mm; }
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; }
+  .tile { background: #17325c; color: #fff; border-radius: 2.5mm; padding: 3.5mm 4mm; }
+  .tile b { display: block; font-size: 22pt; line-height: 1.05; font-weight: 700; }
+  .tile span { font-size: 9pt; color: #c3d1e8; }
+  .rule { border: 0.6mm solid #b3261e; background: #fdf1f0; border-radius: 2.5mm; padding: 4mm 5mm; }
+  .rule h3 { color: #b3261e; font-size: 12pt; margin-bottom: 2mm; }
+
+  table.t { border-collapse: collapse; width: 100%; font-size: 9.6pt; }
+  table.t th, table.t td { text-align: left; padding: 1.3mm 2mm; border-bottom: 0.3mm solid #dfe3ea; vertical-align: top; }
+  table.t th { color: #5b6478; font-weight: 600; font-size: 8.5pt; text-transform: uppercase; letter-spacing: .04em; }
+  table.t td.n { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+  .flow { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; }
+  .flow svg { width: 100%; height: 100%; }
+  .legend { display: flex; gap: 8mm; font-size: 9pt; color: #5b6478; margin-bottom: 7mm; align-items: center; }
+  .sw { display: inline-block; width: 4mm; height: 4mm; border-radius: 1mm; vertical-align: -0.8mm; margin-right: 1.5mm; }
+
+  .flag { font-family: Consolas, "Courier New", monospace; font-size: 8.8pt; background: #eceff4; padding: 0 1mm; border-radius: 1mm; white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<!-- 1 COVER ================================================================ -->
+<section class="page cover">
+  <div class="left">
+    <div class="kicker">How the car photo pipeline works</div>
+    <h1>From a phone walk-around video to studio shots of the car</h1>
+    <p class="sub">One short video of a car goes in. Out come clean photos of every side of that car, standing in a
+      professional studio, with number plates covered and the car itself exactly as it was shot.</p>
+    <p class="date">Based on the end-to-end test run of 24 Nov 2026: a 27-second phone video of a Maruti Suzuki Baleno 2022.</p>
+    <div class="facts">
+      <div><b>6 sides</b>picked automatically from the video</div>
+      <div><b>3 studios</b>each side placed in every studio: 18 shots</div>
+      <div><b>~$0.04</b>cloud cost per photo in that run</div>
+    </div>
+  </div>
+  <div class="right">
+    <img src="../images/00_before_after.jpg" alt="A frame from the video and the studio shot made from it">
+    <p>Left: one frame of the video, on a street. Right: the same car, same pixels, in a studio.</p>
+  </div>
+</section>
+
+<!-- 2 WHY ================================================================== -->
+<section class="page">
+  <div class="title">Why this exists</div>
+  <div class="subtitle">The problem, the result, and the one rule the system never breaks.</div>
+  <div class="cols" style="grid-template-columns: 1fr 1fr;">
+    <div style="display:flex; flex-direction:column; gap:5mm;">
+      <div class="card">
+        <h3>The problem</h3>
+        <p>Car photos are usually taken wherever the car happens to be: a street, a driveway, a parking lot.
+          Other cars, people, buildings and number plates are all in the shot, and every photo looks different.
+          Turning that into a clean, consistent set of studio photos by hand takes a person with editing skills,
+          for every car.</p>
+      </div>
+      <div class="card">
+        <h3>What the system does</h3>
+        <p>Someone walks around the car once with a phone. The system picks the best frame for each side of the car,
+          covers the number plates, lifts the car out of the street, and stands it in a studio room that is drawn again
+          from the exact height and angle the phone was held at, with a shadow under the car. No person edits anything.</p>
+        <p style="margin-bottom:0">Each studio picture shows the car from the same viewpoint as the phone did, so the
+          car looks like it was actually photographed there, not cut and pasted.</p>
+      </div>
+      <div class="rule">
+        <h3>The rule: the car's pixels are evidence</h3>
+        <p>These photos document the car's condition, so every dent and scratch must stay exactly as shot. The car is
+          <b>never redrawn, recoloured, relit, sharpened or generated</b>. It may only be turned once to stand level,
+          shrunk once (never enlarged), and cropped at the photo's edge. The single approved exception (Nov 2026) is a
+          fixed dark tint on the <b>windows only</b>. Automatic tests check this pixel for pixel.</p>
+      </div>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:5mm;">
+      <div class="tiles">
+        <div class="tile"><b>~2 min</b><span>per photo on the laptop (113 s on average in the test run)</span></div>
+        <div class="tile"><b>~$0.04</b><span>per photo for the cloud models (about $0.23 for all 6 photos)</span></div>
+        <div class="tile"><b>18</b><span>studio shots from one 27-second video (6 sides × 3 studios)</span></div>
+        <div class="tile"><b>$0</b><span>to run the same video again: every cloud answer is kept and reused</span></div>
+      </div>
+      <div class="card">
+        <h3>Measured run, 24 Nov 2026</h3>
+        <table class="t">
+          <tr><th>Part of the run</th><th style="text-align:right">Time</th></tr>
+          <tr><td>Step 1: pick one frame per side</td><td class="n">18.8 s</td></tr>
+          <tr><td>Step 2: cover the number plates</td><td class="n">2.4 s</td></tr>
+          <tr><td>Steps 3–12: cut-out, camera, 3D fit, studio, paste (6 photos × 3 studios)</td><td class="n">677.6 s</td></tr>
+          <tr><td class="muted">…of which waiting on the cloud models</td><td class="n muted">~44 s per photo</td></tr>
+          <tr><td>Cloud models: 37 calls in all</td><td class="n">~$0.23</td></tr>
+        </table>
+        <p class="muted" style="margin:2mm 0 0; font-size:8.8pt">Input video: 464 × 832 pixels, portrait, from a phone.
+          The heavy lifting runs on an ordinary laptop processor; four open models run on a pay-per-use cloud
+          service (fal.ai). If the cloud fails, each step falls back to the laptop.</p>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span>From walk-around video to studio shots</span><span>2</span></div>
+</section>
+
+<!-- 3 FLOW ================================================================= -->
+<section class="page">
+  <div class="title">The whole flow on one page</div>
+  <div class="subtitle">One command runs every step in order. The following pages take each box in turn.</div>
+  <div class="flow">
+    <svg viewBox="0 0 1000 470" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Arial, sans-serif">
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#7a8396"/>
+        </marker>
+      </defs>
+      <style>
+        .bx { stroke-width: 2; rx: 12; }
+        .lap { fill: #eef6f0; stroke: #2e8a4c; }
+        .cl  { fill: #fdf3ea; stroke: #d27a1f; }
+        .mix { fill: #f5f0fa; stroke: #7b52ab; }
+        .io  { fill: #17325c; stroke: #17325c; }
+        .nm  { font-size: 15px; font-weight: 700; fill: #17325c; }
+        .ttl { font-size: 15.5px; font-weight: 600; fill: #1d2433; }
+        .sub { font-size: 12.5px; fill: #5b6478; }
+        .iot { font-size: 16px; font-weight: 600; fill: #fff; }
+        .ios { font-size: 12.5px; fill: #c3d1e8; }
+        .ln  { stroke: #7a8396; stroke-width: 2.2; fill: none; marker-end: url(#ah); }
+      </style>
+
+      <!-- row 1 -->
+      <rect class="bx io" x="10" y="40" width="170" height="130"/>
+      <text class="iot" x="95" y="95" text-anchor="middle">Walk-around</text>
+      <text class="iot" x="95" y="116" text-anchor="middle">video</text>
+      <text class="ios" x="95" y="142" text-anchor="middle">plus the car's real size</text>
+
+      <rect class="bx lap" x="210" y="40" width="170" height="130"/>
+      <text class="nm" x="226" y="68">1</text>
+      <text class="ttl" x="226" y="94">Pick one frame</text>
+      <text class="ttl" x="226" y="113">per side</text>
+      <text class="sub" x="226" y="138">best of 54 frames for</text>
+      <text class="sub" x="226" y="155">each of 8 sides</text>
+
+      <rect class="bx lap" x="410" y="40" width="170" height="130"/>
+      <text class="nm" x="426" y="68">2</text>
+      <text class="ttl" x="426" y="94">Cover the</text>
+      <text class="ttl" x="426" y="113">number plates</text>
+      <text class="sub" x="426" y="138">branded cover fitted</text>
+      <text class="sub" x="426" y="155">to the plate's corners</text>
+
+      <rect class="bx cl" x="610" y="40" width="170" height="130"/>
+      <text class="nm" x="626" y="68">3 – 4</text>
+      <text class="ttl" x="626" y="94">Cut the car out,</text>
+      <text class="ttl" x="626" y="113">this car only</text>
+      <text class="sub" x="626" y="138">drop passers-by and</text>
+      <text class="sub" x="626" y="155">other cars</text>
+
+      <rect class="bx cl" x="810" y="40" width="170" height="130"/>
+      <text class="nm" x="826" y="68">5</text>
+      <text class="ttl" x="826" y="94">Tint the</text>
+      <text class="ttl" x="826" y="113">windows</text>
+      <text class="sub" x="826" y="138">hide the street seen</text>
+      <text class="sub" x="826" y="155">through the glass</text>
+
+      <line class="ln" x1="180" y1="105" x2="207" y2="105"/>
+      <line class="ln" x1="380" y1="105" x2="407" y2="105"/>
+      <line class="ln" x1="580" y1="105" x2="607" y2="105"/>
+      <line class="ln" x1="780" y1="105" x2="807" y2="105"/>
+
+      <!-- turn -->
+      <path class="ln" d="M895,170 L895,215 L95,215 L95,247"/>
+
+      <!-- row 2 -->
+      <rect class="bx mix" x="10" y="250" width="170" height="130"/>
+      <text class="nm" x="26" y="278">6 – 7</text>
+      <text class="ttl" x="26" y="304">Measure the</text>
+      <text class="ttl" x="26" y="323">camera</text>
+      <text class="sub" x="26" y="348">phone height, tilt and</text>
+      <text class="sub" x="26" y="365">lens for each photo</text>
+
+      <rect class="bx lap" x="210" y="250" width="170" height="130"/>
+      <text class="nm" x="226" y="278">8 – 9</text>
+      <text class="ttl" x="226" y="304">Fit a 3D car, level</text>
+      <text class="ttl" x="226" y="323">it, find the tyres</text>
+      <text class="sub" x="226" y="348">which way it faces and</text>
+      <text class="sub" x="226" y="365">where it stands</text>
+
+      <rect class="bx lap" x="410" y="250" width="170" height="130"/>
+      <text class="nm" x="426" y="278">10 – 11</text>
+      <text class="ttl" x="426" y="304">Redraw the studio,</text>
+      <text class="ttl" x="426" y="323">add shadows</text>
+      <text class="sub" x="426" y="348">from the phone's own</text>
+      <text class="sub" x="426" y="365">viewpoint</text>
+
+      <rect class="bx lap" x="610" y="250" width="170" height="130"/>
+      <text class="nm" x="626" y="278">12</text>
+      <text class="ttl" x="626" y="304">Paste the car</text>
+      <text class="ttl" x="626" y="323">last</text>
+      <text class="sub" x="626" y="348">one shot per photo</text>
+      <text class="sub" x="626" y="365">per studio</text>
+
+      <rect class="bx io" x="810" y="250" width="170" height="130"/>
+      <text class="nm" x="826" y="278" style="fill:#9fb6da">13</text>
+      <text class="iot" x="826" y="304">Studio shots</text>
+      <text class="iot" x="826" y="323">+ report</text>
+      <text class="ios" x="826" y="348">photos needing a look</text>
+      <text class="ios" x="826" y="365">are flagged; cost shown</text>
+
+      <line class="ln" x1="180" y1="315" x2="207" y2="315"/>
+      <line class="ln" x1="380" y1="315" x2="407" y2="315"/>
+      <line class="ln" x1="580" y1="315" x2="607" y2="315"/>
+      <line class="ln" x1="780" y1="315" x2="807" y2="315"/>
+
+      <!-- brace: once per photo vs once per studio -->
+      <path d="M12,405 L12,415 L378,415 L378,405" fill="none" stroke="#9aa3b5" stroke-width="1.5"/>
+      <text class="sub" x="195" y="440" text-anchor="middle">done once per photo</text>
+      <path d="M412,405 L412,415 L778,415 L778,405" fill="none" stroke="#9aa3b5" stroke-width="1.5"/>
+      <text class="sub" x="595" y="440" text-anchor="middle">repeated for each studio background</text>
+    </svg>
+  </div>
+  <div class="legend">
+    <span><span class="sw" style="background:#eef6f0; border:0.5mm solid #2e8a4c"></span>runs on the laptop</span>
+    <span><span class="sw" style="background:#fdf3ea; border:0.5mm solid #d27a1f"></span>open model on the cloud (fal.ai), laptop as backup</span>
+    <span><span class="sw" style="background:#f5f0fa; border:0.5mm solid #7b52ab"></span>cloud models, checked on the laptop</span>
+  </div>
+  <div class="foot"><span>From walk-around video to studio shots</span><span>3</span></div>
+</section>
+
+<!-- 4 STEP 1 =============================================================== -->
+<section class="page">
+  <header class="sh">
+    <div class="num">1</div>
+    <div><h2>Pick one frame per side of the car <span class="where laptop">laptop</span></h2>
+      <p class="lead">From hundreds of near-identical video frames to one good photo of each side.</p></div>
+  </header>
+  <div class="body wide">
+    <div class="figs">
+      <figure>
+        <div class="img"><img src="../images/01_picked_sides.jpg" alt="The six frames picked"></div>
+        <figcaption>The six frames picked from the test video, one per side, each with how sure the system was
+          (plates already covered by step 2).</figcaption>
+      </figure>
+    </div>
+    <div class="boxes">
+      <div class="box b-do"><h3>What it does</h3>
+        <p>Takes one frame every half second (54 frames from the 27 s video). An image-recognition model scores each
+          frame for 8 views: front, back, left, right and the four corners. The best frame for each view is kept;
+          weak guesses (below 30% sure) are not used.</p></div>
+      <div class="box b-why"><h3>What problem it solves</h3>
+        <p>A video has hundreds of nearly identical frames. A buyer wants one clean shot per side, and every later
+          step costs time and money per photo. The side label is also kept as a first guess for which way the car
+          faces in step 8.</p></div>
+      <div class="box b-in"><h3>Input</h3>
+        <p>The walk-around video.</p></div>
+      <div class="box b-out"><h3>Output</h3>
+        <p>One photo per side, named after its side and confidence, plus a list of sides not found. This video gave
+          6 sides: it has no straight left or right view (best score 13%).</p></div>
+    </div>
+  </div>
+  <div class="foot"><span>Step 1 · Pick sides</span><span>4</span></div>
+</section>
+
+<!-- 5 STEP 2 =============================================================== -->
+<section class="page">
+  <header class="sh">
+    <div class="num">2</div>
+    <div><h2>Cover the number plates <span class="where laptop">laptop</span></h2>
+      <p class="lead">Privacy first: no readable plate leaves the system.</p></div>
+  </header>
+  <div class="body" style="grid-template-columns: 1fr 150mm;">
+    <div class="figs">
+      <figure>
+        <div class="img"><img src="../images/02_plate_detected.jpg" alt="Plate found and covered"></div>
+        <figcaption>The plate is found (box), its exact four corners are traced, and the cover is laid onto them.</figcaption>
+      </figure>
+    </div>
+    <div class="boxes">
+      <div class="box b-do"><h3>What it does</h3>
+        <ul>
+          <li>A small detector draws a box round each plate.</li>
+          <li>Simple image analysis finds the plate's own four corners inside that box. It works on white, yellow,
+            black and coloured plates.</li>
+          <li>A branded cover is bent onto exactly those corners and darkened to match the light on the plate. If the
+            corners can't be found, a plain solid box covers the plate instead.</li>
+        </ul></div>
+      <div class="box b-why"><h3>What problem it solves</h3>
+        <ul>
+          <li><b>Privacy:</b> plates must not appear in published photos. A missed plate is a leak, so the detector is
+            deliberately set to be eager (it acts from 25% sure).</li>
+          <li><b>Looks:</b> a flat rectangle looks stuck on when the plate is seen at an angle. Fitting the corners
+            makes the cover sit flat on the plate, and matching the brightness stops it glowing in shadow.</li>
+        </ul></div>
+      <div class="box b-in"><h3>Input</h3><p>The photos picked in step 1.</p></div>
+      <div class="box b-out"><h3>Output</h3><p>The same photos, same names, with every plate covered, plus a log of
+        where each plate was and how it was covered.</p></div>
+    </div>
+  </div>
+  <div class="foot"><span>Step 2 · Number plates</span><span>5</span></div>
+</section>
+
+<!-- 6 STEPS 3-4 ============================================================ -->
+<section class="page">
+  <header class="sh">
+    <div class="num">3–4</div>
+    <div><h2>Cut the car out, and keep only this car <span class="where fal">cloud</span></h2>
+      <p class="lead">Decide, pixel by pixel, what is the car and what is not.</p></div>
+  </header>
+  <div class="body">
+    <div class="figs">
+      <figure>
+        <div class="img"><img src="../images/step_03_cutout_cleanup.jpg" alt="Cut-out after clean-up"></div>
+        <figcaption>Step 3: the car the model found (grey) and its final outline (green).</figcaption>
+      </figure>
+      <figure>
+        <div class="img"><img src="../images/step_04_cutout_isolation.jpg" alt="Only this car kept"></div>
+        <figcaption>Step 4: this car is kept (green); small bits of other vehicles in the distance (red) are removed.</figcaption>
+      </figure>
+    </div>
+    <div class="boxes">
+      <div class="box b-do"><h3>What it does</h3>
+        <p><b>Step 3.</b> A cut-out model (BiRefNet) marks every pixel as car, background or edge. A clean-up drops
+          stray specks, cuts off poles touching the car, fills the window holes and keeps a thin soft edge.</p>
+        <p><b>Step 4.</b> A second model (SAM 3), asked for "car", outlines every car in the photo. The one matching
+          the cut-out is kept; anything stuck to it is removed.</p></div>
+      <div class="box b-why"><h3>What problem it solves</h3>
+        <p>Every later step needs the exact outline of the car. A ragged edge shows as a halo in the studio, and a
+          hole in the glass would let the studio show through the car. Step 4 stops a parked car behind, a scooter
+          or a passer-by being pasted into the studio as part of "the car".</p></div>
+      <div class="box b-in"><h3>Input</h3><p>The plate-covered photo.</p></div>
+      <div class="box b-out"><h3>Output</h3><p>The car's outline (a mask): this car only. If the cloud fails, a
+        smaller model on the laptop takes over and the photo is flagged.</p></div>
+    </div>
+  </div>
+  <div class="foot"><span>Steps 3–4 · Cut-out</span><span>6</span></div>
+</section>
+
+<!-- 7 STEP 5 =============================================================== -->
+<section class="page">
+  <header class="sh">
+    <div class="num">5</div>
+    <div><h2>Tint the windows <span class="where fal">cloud</span></h2>
+      <p class="lead">The one approved change to the car's pixels, and only on the glass.</p></div>
+  </header>
+  <div class="body wide">
+    <div class="figs">
+      <figure>
+        <div class="img"><img src="../images/step_05b_glass_tint.jpg" alt="Glass tint before and after"></div>
+        <figcaption>Left: the photo. Middle: tinted. Right: every changed pixel outlined. In this photo 10,262 pixels
+          changed, and 0 of them outside the window outline.</figcaption>
+      </figure>
+    </div>
+    <div class="boxes">
+      <div class="box b-do"><h3>What it does</h3>
+        <p>SAM 3 is asked for "car window" and "windshield". Inside that outline only, pulled slightly away from the
+          paint, the glass gets one fixed dark blue-grey shade: 85% tint, 15% of the original showing through, with
+          soft edges.</p></div>
+      <div class="box b-why"><h3>What problem it solves</h3>
+        <p>Glass shows what was behind the car: the street, buildings, other cars. A street seen through the
+          windscreen of a car in a white studio gives the edit away at once. The tint is the same on every photo:
+          nothing is measured or generated.</p></div>
+      <div class="box b-in"><h3>Input</h3><p>The photo and the car's outline from steps 3–4.</p></div>
+      <div class="box b-out"><h3>Output</h3><p>The tinted photo, used from here on. The untouched original is kept
+        alongside it. If the glass can't be found, nothing is tinted and the photo is flagged.</p></div>
+    </div>
+  </div>
+  <div class="foot"><span>Step 5 · Glass</span><span>7</span></div>
+</section>
+
+<!-- 8 STEPS 6-7 ============================================================ -->
+<section class="page">
+  <header class="sh">
+    <div class="num">6–7</div>
+    <div><h2>Measure the camera <span class="where fal">cloud</span><span class="where laptop">laptop check</span></h2>
+      <p class="lead">Where the phone was, how high, and how it was tilted, for every photo.</p></div>
+  </header>
+  <div class="body">
+    <div class="figs">
+      <figure>
+        <div class="img"><img src="../images/step_05c_hosted_camera.jpg" alt="Camera from the cloud models"></div>
+        <figcaption>Camera measured by the cloud models, with the horizon they imply.</figcaption>
+      </figure>
+      <figure>
+        <div class="img"><img src="../images/step_06_camera_lines.jpg" alt="Camera from background lines"></div>
+        <figcaption>The independent check: straight lines in the street (kerbs, walls, windows).</figcaption>
+      </figure>
+    </div>
+    <div class="boxes">
+      <div class="box b-do"><h3>What it does</h3>
+        <p><b>Step 6.</b> Two cloud models (MoGe-3 and VGGT) turn the photos into 3D and give the phone's height,
+          downward angle, sideways tilt and lens zoom. The straight lines in the background are measured on the
+          laptop as a check; if they disagree by more than 5°, the lines win and the photo is flagged.</p>
+        <p><b>Step 7.</b> All photos come from one phone, so one lens setting is agreed for the whole set.</p></div>
+      <div class="box b-why"><h3>What problem it solves</h3>
+        <p>A car shot from 1.7 m looking down, pasted into a studio seen at eye level, looks like a cardboard
+          cut-out. These numbers decide how the studio is redrawn, where its floor is and how the car is levelled.
+          Pooling the lens setting turns many noisy guesses into one good one.</p></div>
+      <div class="box b-in"><h3>Input</h3><p>The tinted photos and the car's outline (so lines on the car itself are ignored).</p></div>
+      <div class="box b-out"><h3>Output</h3><p>A camera per photo. Front photo: 1.70 m high, looking 17.8° down,
+        tilted 0.9°. 4 of the 6 photos used the cloud camera; the 2 back photos kept their own lines.</p></div>
+    </div>
+  </div>
+  <div class="foot"><span>Steps 6–7 · Camera</span><span>8</span></div>
+</section>
+
+<!-- 9 STEPS 8-9 ============================================================ -->
+<section class="page">
+  <header class="sh">
+    <div class="num">8–9</div>
+    <div><h2>Fit a 3D car, level it, find the tyres <span class="where laptop">laptop</span></h2>
+      <p class="lead">Give the flat cut-out a direction and a place on a real floor.</p></div>
+  </header>
+  <div class="body">
+    <div class="figs">
+      <figure>
+        <div class="img"><img src="../images/step_08_outline_fit.jpg" alt="3D car fitted to the outline"></div>
+        <figcaption>Step 8: the photo's outline (red) against the simple 3D car (green), seen through the measured camera.</figcaption>
+      </figure>
+      <figure>
+        <div class="img"><img src="../images/step_11_tyres.jpg" alt="Tyre contacts"></div>
+        <figcaption>Step 9: where the tyres touch the ground, predicted, found and locked.</figcaption>
+      </figure>
+    </div>
+    <div class="boxes">
+      <div class="box b-do"><h3>What it does</h3>
+        <p><b>Step 8.</b> A simple block model of the car is built from its real length, width, height and wheelbase,
+          then turned through every angle until its outline best matches the photo's (scored 0 to 1).</p>
+        <p><b>Step 9.</b> If the phone was held crooked, the car is turned once, as a whole, to stand level. The tyre
+          bottoms are found and the 3D model is pinned to them.</p></div>
+      <div class="box b-why"><h3>What problem it solves</h3>
+        <p>A flat cut-out doesn't know where its wheels touch the ground or which way it faces. Without this the car
+          would float above the studio floor or sink into it, sit on a slope, and get a shadow in the wrong shape.</p></div>
+      <div class="box b-in"><h3>Input</h3><p>The cut-out, the camera, the car's real size, and the side label from step 1.</p></div>
+      <div class="box b-out"><h3>Output</h3><p>Which way the car faces, how far away the phone was, the levelled car
+        and its tyre points. Front photo: match 0.94, phone 3.95 m away. Matches below 0.90 are flagged.</p></div>
+    </div>
+  </div>
+  <div class="foot"><span>Steps 8–9 · 3D fit, level, tyres</span><span>9</span></div>
+</section>
+
+<!-- 10 STEPS 10-11 ========================================================= -->
+<section class="page">
+  <header class="sh">
+    <div class="num">10–11</div>
+    <div><h2>Redraw the studio from the phone's viewpoint, add shadows <span class="where laptop">laptop</span></h2>
+      <p class="lead">The studio is moved to match the car, never the other way round.</p></div>
+  </header>
+  <div class="body">
+    <div class="figs">
+      <figure>
+        <div class="img"><img src="../images/step_bg1_12_room.jpg" alt="Studio redrawn from the phone's camera"></div>
+        <figcaption>Step 10: the studio redrawn from this photo's camera.</figcaption>
+      </figure>
+      <figure>
+        <div class="img"><img src="../images/step_bg1_15_background_ready.jpg" alt="Background ready with shadow"></div>
+        <figcaption>Step 11: shadow and floor reflection added; the background is ready for the car.</figcaption>
+      </figure>
+    </div>
+    <div class="boxes">
+      <div class="box b-do"><h3>What it does</h3>
+        <p><b>Step 10.</b> Each studio picture was measured once as a 3D room: floor, walls, ceiling. The room is drawn
+          again from this photo's camera, using plain geometry on the laptop (no AI). Parts the studio picture never
+          showed are filled from nearby texture and recorded.</p>
+        <p><b>Step 11.</b> A shadow shaped by the car's footprint, and on glossy floors a faint reflection, are drawn
+          on the floor.</p></div>
+      <div class="box b-why"><h3>What problem it solves</h3>
+        <p>A car shot from above on a background shot at eye level is the classic sign of a fake. Redrawing the room
+          makes floor, walls and horizon agree with the car for every angle. A car with no shadow looks like a sticker;
+          drawing it on the background keeps the car's pixels untouched.</p></div>
+      <div class="box b-in"><h3>Input</h3><p>The studio picture and its 3D room, the photo's camera, the car's position.</p></div>
+      <div class="box b-out"><h3>Output</h3><p>The studio background, seen from the phone's viewpoint, with shadow, ready for
+        the car. Too much filled-in area is flagged.</p></div>
+    </div>
+  </div>
+  <div class="foot"><span>Steps 10–11 · Studio and shadows</span><span>10</span></div>
+</section>
+
+<!-- 11 STEP 12 ============================================================= -->
+<section class="page">
+  <header class="sh">
+    <div class="num">12</div>
+    <div><h2>Paste the car last <span class="where laptop">laptop</span></h2>
+      <p class="lead">The car in the result is the car in the photo, pixel for pixel.</p></div>
+  </header>
+  <div class="body" style="grid-template-columns: 1fr 82mm;">
+    <div class="figs" style="gap:3mm">
+      <figure>
+        <div class="img"><img src="../images/12_final_background_1.jpg" alt="Studio 1"></div>
+        <figcaption>Studio 1</figcaption>
+      </figure>
+      <figure>
+        <div class="img"><img src="../images/12_final_background_2.jpg" alt="Studio 2"></div>
+        <figcaption>Studio 2</figcaption>
+      </figure>
+      <figure>
+        <div class="img"><img src="../images/12_final_background_3.jpg" alt="Studio 3"></div>
+        <figcaption>Studio 3</figcaption>
+      </figure>
+    </div>
+    <div class="boxes">
+      <div class="box b-do"><h3>What it does</h3>
+        <p>The levelled car is shrunk once, by plain averaging, to the room's scale. It is never enlarged. It is
+          placed on the finished background at its pinned floor position, and nothing is drawn after it. If the car ran
+          off the edge of the photo, the result is framed the same way, so no missing part is ever invented.</p></div>
+      <div class="box b-why"><h3>What problem it solves</h3>
+        <p>It keeps the result honest. Apart from the one shrink, every dent and scratch is exactly as shot. Automatic
+          tests check this pixel for pixel.</p></div>
+      <div class="box b-in"><h3>Input</h3><p>The levelled car from step 9 and the finished background from step 11.</p></div>
+      <div class="box b-out"><h3>Output</h3><p>One image per photo per studio: 6 × 3 = 18 images in the test run.</p></div>
+    </div>
+  </div>
+  <div class="foot"><span>Step 12 · Paste</span><span>11</span></div>
+</section>
+
+<!-- 12 STEP 13 ============================================================= -->
+<section class="page">
+  <header class="sh">
+    <div class="num">13</div>
+    <div><h2>Report, flags and cost <span class="where laptop">laptop</span></h2>
+      <p class="lead">A run never stops on one bad photo; it tells a person where to look.</p></div>
+  </header>
+  <div class="body" style="grid-template-columns: 62mm 1fr;">
+    <div class="figs">
+      <figure>
+        <div class="img"><img src="../images/12_all_results.jpg" alt="Every photo on every studio"></div>
+        <figcaption>Every photo of the run on every studio.</figcaption>
+      </figure>
+    </div>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto auto 1fr; gap: 2.6mm; min-height:0;">
+      <div class="box b-do"><h3>What it does</h3>
+        <p>Writes one line per photo per studio with all the measurements, timings, cost and a <b>flags</b> column.
+          It then builds a single web page showing, for each photo, a picture of every step and every result, plus
+          the time and cloud spend of the run.</p></div>
+      <div class="box b-why"><h3>What problem it solves</h3>
+        <p>Unsure photos are placed and flagged, never silently dropped. A person checks the few flagged photos
+          instead of all of them, and the cost line keeps the cloud spend visible.</p></div>
+      <div class="box b-in"><h3>Input</h3><p>Everything the steps above produced.</p></div>
+      <div class="box b-out"><h3>Output</h3><p>The studio images, the results table with flags, and the step-by-step
+        report page (the pictures in this document come from it).</p></div>
+      <div class="card" style="grid-column: 1 / 3;">
+        <h3>Cost control</h3>
+        <table class="t">
+          <tr><th>Item</th><th style="text-align:right">Test run, 6 photos</th></tr>
+          <tr><td>Cloud calls</td><td class="n">37</td></tr>
+          <tr><td>Window and car outlines (SAM 3)</td><td class="n">$0.12</td></tr>
+          <tr><td>Camera from one photo (MoGe-3)</td><td class="n">$0.09</td></tr>
+          <tr><td>Cut-out (BiRefNet) + camera from all photos (VGGT)</td><td class="n">$0.01 + $0.01</td></tr>
+          <tr><td><b>Total</b></td><td class="n"><b>~$0.23 (~$0.04 per photo)</b></td></tr>
+        </table>
+        <p class="muted" style="margin:2mm 0 0; font-size:9pt">Every cloud answer is saved, so running the same photos
+          again costs $0. A budget of $3 per car stops cloud calls if reached, and the run carries on with the laptop
+          models.</p>
+      </div>
+      <div class="card" style="grid-column: 1 / 3;">
+        <h3>Examples of flags</h3>
+        <p style="margin:0; font-size:9.4pt"><span class="flag">weak-fit</span> 3D match below 0.90 ·
+          <span class="flag">camera-lines-fallback</span> cloud camera overruled by the photo's own lines ·
+          <span class="flag">hosted-cutout-failed</span> cloud cut-out failed, laptop used ·
+          <span class="flag">glass-mask-failed</span> windows not tinted ·
+          <span class="flag">invented</span> too much studio filled in</p>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span>Step 13 · Report</span><span>12</span></div>
+</section>
+
+<!-- 13 LIMITS ============================================================== -->
+<section class="page">
+  <div class="title">What is reliable, what isn't yet, and what's next</div>
+  <div class="subtitle">From the single end-to-end test run of 24 Nov 2026 (one video, one car, 6 photos, 3 studios).</div>
+  <div class="cols" style="grid-template-columns: 1fr 1fr 1fr; gap: 6mm;">
+    <div class="card" style="background:#ecf6ef;">
+      <h3 style="color:#24703d">Reliable</h3>
+      <ul>
+        <li><b>The car is untouched.</b> Apart from the window tint, one levelling turn and one shrink, car pixels are
+          copied exactly; tests check it pixel for pixel. In the glass test, 0 pixels changed outside the window outline.</li>
+        <li><b>Plates are covered</b> before any other step, with an eager detector so that plates are not missed.</li>
+        <li><b>Nothing stops the run.</b> Every cloud step has a laptop backup; doubtful photos are still produced and
+          flagged.</li>
+        <li><b>Cost is small and capped:</b> about $0.04 per photo, $0 on a rerun, and a $3 per car budget.</li>
+        <li><b>Good fits.</b> The front photo matched its 3D model at 0.94 out of 1.</li>
+      </ul>
+    </div>
+    <div class="card" style="background:#fdf3ea;">
+      <h3 style="color:#b0620f">Known limits</h3>
+      <ul>
+        <li><b>One weak fit.</b> The back-right photo matched at 0.85 (<span class="flag">weak-fit</span>): something
+          was stuck to the car or blocking it. It was placed and flagged for a person to look at.</li>
+        <li><b>Cloud fallbacks.</b> If the cloud fails, smaller models on the laptop take over and the photo is
+          flagged. For the 2 back photos the cloud camera was overruled by the
+          street lines.</li>
+        <li><b>Missing sides.</b> The sample video has no straight left or right view (best score 13%), so only 6 of
+          8 sides came out. The side picker always names a side, even for a close-up; a low score is the only warning.</li>
+        <li><b>Resolution.</b> The car is never enlarged, so the result is only as sharp as the phone video
+          (464 × 832 here).</li>
+        <li><b>Speed.</b> About 2 minutes per photo on the laptop.</li>
+      </ul>
+    </div>
+    <div class="card" style="background:#eef3fb;">
+      <h3 style="color:#2f5fa7">Proposed next steps</h3>
+      <ul>
+        <li><b>Test on more cars and videos.</b> All numbers here come from one 27-second video; more runs would show
+          how often photos get flagged.</li>
+        <li><b>Better capture.</b> A walk-around that pauses at each straight side, so all 8 sides are found.</li>
+        <li><b>Higher-resolution video</b> for sharper results, since the car is never enlarged.</li>
+        <li><b>A review routine</b> for flagged photos, using the step-by-step report.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="foot"><span>Reliability, limits and next steps</span><span>13</span></div>
+</section>
+
+</body>
+</html>

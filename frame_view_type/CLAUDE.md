@@ -7,7 +7,7 @@ First tool in the chain. It takes one frame every `every_seconds` and runs an 8-
 | File | Role | Key types / entry points |
 |---|---|---|
 | `classify_video.py` | CLI entry | `main()`, `load_config()`, `load_model()`, `sample_frames()`, `classify()`; `SIDE_NAMES`, `DEFAULT_EVERY` 2.0, `DEFAULT_CKPT`, `CONFIG_KEYS` |
-| `config.toml` | `input` (`sample_vid.mp4`), `output` (`output`), `every_seconds` (2), `checkpoint` (`vendor/view_classifier/models/joint_v2_best.pt`) | — |
+| `config.toml` | `input` (`sample_vid.mp4`), `output` (`output`), `every_seconds` (2), `checkpoint` (`vendor/view_classifier/models/joint_v2_best.pt`), `pick_sides` (false), `pick_min_prob` (0.3) | — |
 | `requirements.txt` | `torch==2.9.1`, `torchvision==0.24.1` (match the vendor pins), plus unpinned `pillow`, `numpy`, `opencv-python-headless` | — |
 | `README.md` | Setup (clone, pinned commit, `git lfs pull`), run, output, speed | — |
 | `docs/` | Research notes from before the build (01-05). Index: [docs/README.md](docs/README.md). Not code docs. | — |
@@ -24,13 +24,14 @@ First tool in the chain. It takes one frame every `every_seconds` and runs an 8-
    - angle = `sincos_to_deg`: 0° = front, clockwise, 90° = the car's right. It comes from a separate head, so it can disagree with the side.
 5. Frames are written to `output/<video stem>/<t:06.1f>s_<side>_<round(conf·100)>pct.jpg` (PIL RGB, quality 95, full resolution), e.g. `0012.0s_front-right_93pct.jpg`.
 6. `results.csv` is written as UTF-8 with columns `file, time_s` (2 dp), `side, angle_deg` (1 dp), `confidence` (3 dp), then `prob_front, prob_front-right, prob_right, prob_back-right, prob_back, prob_back-left, prob_left, prob_front-left` (3 dp, in `POSE_CLASSES` order).
+7. `pick_sides` (`--pick-sides`): `write_sides` clears and refills `output/<stem>_sides/`. `pick_sides()` is greedy over all (prob_<side>, frame) pairs, highest first, each side and each frame used once, stopping below `pick_min_prob`. Frames are copied under their **own** names (the argmax label stays in the name, so the file-name contract holds even when a frame fills a neighbouring side). Its `results.csv` = the chosen rows + `picked_for`, `picked_prob`; unfilled sides go to `missing_sides.txt`, never into the CSV (downstream would read an empty row). background_changer finds this CSV as the view prior because the images folder downstream is named `<stem>_sides`. On `sample_vid.mp4` (0.5 s) 6 sides come out: the video has no straight left/right view (max prob 0.13).
 
 Vendor names used: `view_classifier.labels.{POSE_CLASSES, sincos_to_deg}`, `view_classifier.model.ConvNeXtViewClassifier`, `view_classifier.transforms_cfv.{eval_tensorize, square_reflect_crop}`. `vendor/view_classifier` is inserted at `sys.path[0]`.
 
 Downstream:
 - [number_plate_detection](../number_plate_detection/CLAUDE.md) reads `../frame_view_type/output/sample_vid` and keeps the file names.
 - background_changer ([../background_changer/CLAUDE.md](../background_changer/CLAUDE.md)) parses the names with `NAME_RE` in `bg_changer/probe.py`. In room mode it also reads `frame_view_type/output/<images folder name>/results.csv`, keyed by file stem, using the `prob_<label>`, `angle_deg` and `time_s` columns.
-- video_pipeline does not run this tool.
+- video_pipeline's `make_video.py` does not run this tool; its `e2e_steps.py` runs it with `--pick-sides`.
 
 ## Invariants & gotchas
 - **The names are a contract with background_changer.** The `SIDE_NAMES` values (`front, front-right, right, back-right, back, back-left, left, front-left`), the file-name pattern `<float>s_<label>_<int>pct` and the `prob_<label>` columns must match `LABELS`/`NAME_RE` in `bg_changer/probe.py` and `read_view_results` in `car_fit_to_bg/pose.py`. If they drift, the view prior is lost silently (flag `no-view-label`). Left and right are the car's own sides.

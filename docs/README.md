@@ -1,80 +1,84 @@
-# car_bg_changer docs
+# car_demo_img docs
 
-This repo turns a walk-around video of a car, or a folder of car photos, into studio shots of that car. Four projects chain together. `frame_view_type` keeps one frame every 2 s and names the side of the car it shows. `number_plate_detection` finds each number plate and covers exactly its shape, with a branded image warped onto its 4 corners and matched to its lighting, or with a solid colour. `background_changer` cuts the car out and stands it on a studio background; in room mode (the default) it measures each photo's camera, fits a 3D outline of the car, and re-renders the background as a 3D room from that same camera. `video_pipeline` runs plate masking and background change on frames it extracts itself and puts the results back into a video. background_changer never redraws the car's own pixels: at most one rigid rotation and one plain downscale ([findings.md:19-20](../background_changer/docs/findings.md#L19-L20)). video_pipeline may then resize a whole result once more to fit its video frame ([make_video.py:87-98](../video_pipeline/make_video.py#L87-L98)). Everything runs on a CPU; no GPU is needed.
+This repo turns a walk-around video of a car, or a folder of car photos, into studio shots of that car. Four tools
+chain together:
 
-## Flow
+1. **frame_view_type** names the side of the car each frame shows.
+2. **number_plate_detection** covers every number plate.
+3. **background_changer** cuts the car out and stands it in a 3D studio room, seen from the photo's own camera.
+4. **video_pipeline** drives the whole chain from one video.
+
+The car's own pixels are evidence of its condition, so they are never redrawn. The only changes allowed are one
+rigid rotation, one plain downscale, a crop at a photo edge, and (by a decision made in Nov 2026) a fixed dark tint
+on the windows.
+
+![A frame from the walk-around video and the studio shot made from it](images/00_before_after.jpg)
+
+## What's here
+
+| File | For whom | What it covers |
+|---|---|---|
+| [pipeline-steps.md](pipeline-steps.md) | engineers | Every step of the current flow. For each step: what it does, what problem it solves, its input and output, and a picture from a real run. |
+| [glossary.md](glossary.md) | everyone | The terms used in the step write-up, in plain language. |
+| [images/](images/) | — | Pictures from the end-to-end run of 24 Nov 2026 on `sample_vid.mp4`. The plates are covered in every picture. |
+
+The user guides live next to each tool: [background_changer](../background_changer/README.md),
+[number_plate_detection](../number_plate_detection/README.md) and [frame_view_type](../frame_view_type/README.md).
+Research notes are in each tool's own `docs/` folder, for example
+[glass-cutout-camera-options.md](../background_changer/docs/glass-cutout-camera-options.md), which chose the hosted
+models used below.
+
+## The flow in one picture
 
 ```mermaid
-flowchart LR
-  V["car video"] --> F["frame_view_type: one frame every 2 s, side and confidence in the file name, results.csv"]
-  V --> X["video_pipeline stage 1: extract frames 00001.jpg ..."]
-  F --> P["number_plate_detection: plates covered, same file names"]
-  X --> P
-  C["folder of car photos"] --> P
-  P --> B["background_changer: car cut out and stood on a studio background"]
-  F -.->|"results.csv, room mode only"| B
-  B --> W["one WEBP per photo per background"]
-  B --> A["video_pipeline stage 4: frames assembled into an mp4"]
+flowchart TD
+  V["Walk-around video"] --> S1["1. Pick one frame per side<br/>frame_view_type"]
+  S1 --> S2["2. Cover number plates<br/>number_plate_detection"]
+  S2 --> S3["3-5. Cut the car out, keep only this car,<br/>tint the glass (BiRefNet + SAM 3 on fal.ai)"]
+  S3 --> S6["6-7. Measure the camera<br/>(MoGe-3 + VGGT on fal.ai, background lines as a check)"]
+  S6 --> S8["8-9. Fit a 3D car to the outline,<br/>level it, find the tyres"]
+  S8 --> S10["10-11. Rebuild each studio room from the photo's camera,<br/>add shadows and reflection"]
+  S10 --> S12["12. Paste the car last<br/>one image per photo per background"]
+  S12 --> R["13. results.csv flags + step-by-step report (index.html)"]
 ```
 
-- **frame_view_type to plates.** Frames are saved as `<time>s_<side>_<conf>pct.jpg` ([classify_video.py:177](../frame_view_type/classify_video.py#L177)). The plate tool's default input is `../frame_view_type/output/sample_vid` ([config.toml:7](../number_plate_detection/config.toml#L7)), and it keeps the file names ([mask_plates.py:258](../number_plate_detection/mask_plates.py#L258)).
-- **Plates to background.** background_changer's default `images_folder` is `../number_plate_detection/output/sample_vid` ([config.toml:13](../background_changer/config.toml#L13)), so plates are covered before the cut-out. It reads the side and confidence back from each file name ([probe.py:16-33](../background_changer/bg_changer/probe.py#L16-L33)).
-- **results.csv, room mode only.** In room mode background_changer looks for `frame_view_type/output/<same folder name>/results.csv` ([batch.py:56-60](../background_changer/car_fit_to_bg/batch.py#L56-L60), [change_background.py:806-807](../background_changer/change_background.py#L806-L807)) and uses its 8 probabilities as a soft yaw prior ([pose.py:176-183](../background_changer/car_fit_to_bg/pose.py#L176-L183)); without a row, the file-name label is turned into one ([pose.py:200-206](../background_changer/car_fit_to_bg/pose.py#L200-L206)). Flat mode uses only the label, or the cut-out's width/height ratio when there is none ([yaw.py:32-54](../background_changer/bg_changer/yaw.py#L32-L54)). Room mode is the default ([config.toml:35](../background_changer/config.toml#L35)).
-- **video_pipeline.** It samples 5 frames per second of the first 10 s ([config.toml:16-23](../video_pipeline/config.toml#L16-L23)), runs `mask_plates.py --overlay --auto-brightness --brightness-smoothing N` (N = `brightness_smoothing`, 5 as shipped), then `change_background.py --background-view room`, then writes an `mp4v` mp4 ([make_video.py:128-174](../video_pipeline/make_video.py#L128-L174)). Stages 1-3 are skipped when their output is already complete; a frame with no result repeats the previous one ([make_video.py:145-160](../video_pipeline/make_video.py#L145-L160)).
+`video_pipeline/e2e_steps.py` runs this whole flow on one video and writes a report with a picture for every step.
+`video_pipeline/make_video.py` is the older variant: it takes 5 frames a second, skips step 1 and turns the results
+back into an mp4 (see the end of [pipeline-steps.md](pipeline-steps.md#variant-make_videopy-video-in-video-out)).
 
-> Note: video_pipeline does not run frame_view_type; it only reuses its `sample_vid.mp4` ([config.toml:6](../video_pipeline/config.toml#L6)). Its frames are named `00001.jpg` ([make_video.py:67](../video_pipeline/make_video.py#L67)) in a folder called `frames` ([make_video.py:105](../video_pipeline/make_video.py#L105)), so background_changer finds no label, no results.csv and no time in the name. Each frame is fitted with no view prior and flagged `no-view-label` ([batch.py:92-93](../background_changer/car_fit_to_bg/batch.py#L92-L93)), and a frame with weak background lines cannot borrow roll and pitch from its neighbours ([batch.py:83](../background_changer/car_fit_to_bg/batch.py#L83)). See [video_pipeline: no view labels](video_pipeline/README.md#no-view-labels-in-this-pipeline).
+## Models
 
-> Note: [number_plate_detection/README.md:27](../number_plate_detection/README.md#L27) gives the default input as `Final_zoomed_car`; the code reads `sample_vid` from [config.toml:7](../number_plate_detection/config.toml#L7).
+Where it says "fal.ai", the model is an open model run on fal.ai's servers. It costs about $0.04 per photo, and
+every hosted step falls back to the laptop if fal fails. Everything else runs on the laptop's CPU.
 
-## Models at a glance
+| Step | Model | Where it runs | What it gives |
+|---|---|---|---|
+| 1 | `veerupandey/view_classifier` (ConvNeXt-Small) | laptop, PyTorch | which of 8 sides a frame shows, with a probability for each side |
+| 2 | YOLOv9-tiny plate detector (`yolo-v9-t-384-license-plate-end2end`) | laptop, ONNX | a box round each plate; the plate's 4 corners are then found with plain OpenCV |
+| 3 | BiRefNet v2 ("General Use (Dynamic)", 2048 px) | fal.ai; local BiRefNet-lite as the fallback | the cut-out mask |
+| 4-5 | SAM 3, with the prompts "car", "car window" and "windshield" | fal.ai | this car alone, and its windows |
+| 6 | MoGe-3 | fal.ai | per photo: focal length, the floor, and from it the camera's height, pitch and roll |
+| 6 | VGGT-1B | fal.ai | all photos together: one focal length and the angle between shots |
+| 6-12 | none: OpenCV, NumPy, SciPy | laptop | lines, 3D pose fit, levelling, tyres, room rendering, shadows |
 
-Three ML models, one per project; video_pipeline has none. No second model cleans up the cut-out ([03-cutout-refinement.md](background_changer/03-cutout-refinement.md)), and the 3D room is rendered with NumPy and OpenCV, with no neural network ([render.py:1](../background_changer/room3d/render.py#L1)). Both ONNX models use only the `CPUExecutionProvider`, and the PyTorch model loads with `map_location="cpu"`. Speeds were measured on an Intel i5-1240P laptop, CPU only.
+**Measured run (24 Nov 2026, `sample_vid.mp4`, 464×832 portrait, 6 sides × 3 backgrounds):**
 
-| Project | Model | Role | Licence | Runtime | Size and speed | Code |
-|---|---|---|---|---|---|---|
-| frame_view_type | `veerupandey/view_classifier`, ConvNeXt-Small, checkpoint `joint_v2_best.pt` | Which of 8 sides a frame shows, with confidence; plus a sin/cos angle | MIT code; the weights' training-data terms are not all stated ([05-view-classifier-deep-dive.md:157](../frame_view_type/docs/05-view-classifier-deep-dive.md#L157)) | PyTorch 2.9.1, CPU only | 198 MB; ~0.8 s per sampled 4K frame, plus ~19 s to read a 38 s 4K video ([README.md:90-91](../frame_view_type/README.md#L90-L91)) | [classify_video.py:94-97](../frame_view_type/classify_video.py#L94-L97) |
-| number_plate_detection | `yolo-v9-t-384-license-plate-end2end` (YOLOv9-tiny, 384 px input, open-image-models) | A box round each plate; one class, NMS inside the ONNX graph ([findings.md:29](../number_plate_detection/docs/findings.md#L29)); confidence threshold 0.25 | MIT | ONNX Runtime via `open-image-models[onnx]==0.6.0`; 4 intra-op threads, 1 inter-op | 7.4 MB; ~85 ms per 4K frame to find, fit and cover, of which the detector ~50 ms ([README.md:170](../number_plate_detection/README.md#L170)) | [detector.py:14-19](../number_plate_detection/plate_masker/detector.py#L14-L19), [detector.py:89-101](../number_plate_detection/plate_masker/detector.py#L89-L101) |
-| background_changer | BiRefNet general-lite (rembg name `birefnet-general-lite`) | Soft 0..1 alpha of the car: the cut-out | MIT (BiRefNet and rembg) | ONNX Runtime 1.31.1 via `rembg[cpu]==2.0.86`; 4 intra-op threads | ~220 MB; ~17 s per 4K image warm ([findings.md:42](../background_changer/docs/findings.md#L42)); ~12-17 s per photo in a run, up to ~45 s ([README.md:383](../background_changer/README.md#L383)) | [segment.py:22-23](../background_changer/bg_changer/segment.py#L22-L23), [segment.py:169-178](../background_changer/bg_changer/segment.py#L169-L178) |
-| all | none: classical OpenCV, NumPy, SciPy | Plate corners and brightness, mask clean-up, camera from background lines (LSD), 3D pose fit, room rendering, video I/O | Apache-2.0 (OpenCV), BSD (NumPy, SciPy) | CPU | - | [corners.py:599](../number_plate_detection/plate_masker/corners.py#L599), [plate_brightness_detector/detector.py:100](../number_plate_detection/plate_brightness_detector/detector.py#L100), [segment.py:115](../background_changer/bg_changer/segment.py#L115), [lines.py:38-45](../background_changer/car_fit_to_bg/lines.py#L38-L45), [pose.py:474](../background_changer/car_fit_to_bg/pose.py#L474), [render.py:64](../background_changer/room3d/render.py#L64) |
+| Step | Time |
+|---|---|
+| Step 1 | 18.8 s |
+| Step 2 | 2.4 s |
+| Steps 3-12 | 677.6 s, of which about 44 s per photo is waiting on fal |
+| fal usage | 37 calls, about $0.23 in all (SAM 3 $0.12, MoGe-3 $0.09, BiRefNet $0.01, VGGT $0.01) |
 
-> Note: the spyne notes give the cut-out as about 13-17 s per frame, up to ~31 s ([spyne-360-spin-findings.md:495](../background_changer/docs/spyne-360-spin-findings.md#L495)); the README says up to ~45 s.
+A rerun on the same frames is served from the cache and costs $0.
 
-- **View classifier accuracy** is the author's: 94.1% 8-way on the CFV test set (7 cars), 82.9% on UnsupCar ([05-view-classifier-deep-dive.md:94-98](../frame_view_type/docs/05-view-classifier-deep-dive.md#L94-L98)). It has not been measured on our footage.
-- **Plate detector:** on 20 4K test frames it found the main car's plate in all 12 frames where it is visible ([README.md:176](../number_plate_detection/README.md#L176)). Two small plates behind showroom glass were missed at the default 0.25 and caught at 0.15 ([README.md:178](../number_plate_detection/README.md#L178)).
-- **BiRefNet lite** looks the same as BiRefNet general at the 1920×1080 output ([findings.md:29](../background_changer/docs/findings.md#L29)) and is about 4× faster at 4 threads: ~17 s against ~66 s ([findings.md:42-43](../background_changer/docs/findings.md#L42-L43)).
+## Run it
 
-## docs/
+```powershell
+cd video_pipeline
+..\background_changer\.venv\Scripts\python e2e_steps.py
+```
 
-- [README.md](README.md): this index.
-
-## docs/background_changer/
-
-- [README.md](background_changer/README.md): overview of the cut-out, camera, 3D fit and rendering, and an index.
-- [01-models-and-options.md](background_changer/01-models-and-options.md): every model and approach used and considered.
-- [02-car-cutout-model.md](background_changer/02-car-cutout-model.md): the BiRefNet cut-out model.
-- [03-cutout-refinement.md](background_changer/03-cutout-refinement.md): classical clean-up of the mask; no second model.
-- [04-car-dimensions-and-orientation.md](background_changer/04-car-dimensions-and-orientation.md): `cars.json`, the 3D proxy and the yaw.
-- [05-camera-angle.md](background_changer/05-camera-angle.md): roll, pitch, focal, distance, height, levelling and tyre lock.
-- [06-3d-room-rendering.md](background_changer/06-3d-room-rendering.md): rooms, output camera, ray-casting, fills, grounding and composite.
-- Project notes: [README.md](../background_changer/README.md), [findings.md](../background_changer/docs/findings.md), [spyne-360-spin-findings.md](../background_changer/docs/spyne-360-spin-findings.md).
-
-## docs/frame_view_type/
-
-- [README.md](frame_view_type/README.md): overview, output, how background_changer uses it, and an index.
-- [01-model-and-options.md](frame_view_type/01-model-and-options.md): the view_classifier model and every option compared.
-- [02-how-it-works.md](frame_view_type/02-how-it-works.md): step by step through `classify_video.py`, with every setting.
-- Project notes: [README.md](../frame_view_type/README.md), [research notes](../frame_view_type/docs/README.md) ([problem](../frame_view_type/docs/01-problem-definition.md), [options](../frame_view_type/docs/02-options-compared.md), [datasets](../frame_view_type/docs/03-datasets.md), [recommendation](../frame_view_type/docs/04-recommendation-and-next-steps.md), [deep dive](../frame_view_type/docs/05-view-classifier-deep-dive.md)).
-
-## docs/number_plate_detection/
-
-- [README.md](number_plate_detection/README.md): overview of detection, fitting and masking, and an index.
-- [01-model-and-options.md](number_plate_detection/01-model-and-options.md): the YOLOv9 detector and the alternatives.
-- [02-exact-plate-fit.md](number_plate_detection/02-exact-plate-fit.md): from the detector's box to the plate's 4 corners, and the warp.
-- [03-multi-colour-plates.md](number_plate_detection/03-multi-colour-plates.md): plates of every colour.
-- [04-auto-brightness.md](number_plate_detection/04-auto-brightness.md): matching the overlay's brightness to the plate.
-- Project notes: [README.md](../number_plate_detection/README.md), [findings.md](../number_plate_detection/docs/findings.md), [plate_brightness_detector/README.md](../number_plate_detection/plate_brightness_detector/README.md), [test plates](../number_plate_detection/assets/test_plates/README.md).
-
-## docs/video_pipeline/
-
-- [README.md](video_pipeline/README.md): how video_pipeline extracts frames, runs number_plate_detection and background_changer on them, and assembles the mp4. It does not run frame_view_type.
-- Project files (no README of its own): [make_video.py](../video_pipeline/make_video.py), [config.toml](../video_pipeline/config.toml).
+Settings are in [e2e.toml](../video_pipeline/e2e.toml): the video, the sampling step (0.5 s), the car model, the
+backgrounds and hosted on/off. The report is written to `video_pipeline/output/e2e_<video>/index.html`. The fal key
+is read from `FAL_KEY` or from `background_changer\.env`.

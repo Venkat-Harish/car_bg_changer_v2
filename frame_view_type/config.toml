@@ -14,3 +14,12 @@ every_seconds = 2
 
 # Model weights (normally leave as is).
 checkpoint = "vendor/view_classifier/models/joint_v2_best.pt"
+
+# Also keep the best frame for each of the 8 sides in <output>\<video name>_sides\ (same file names, plus a
+# results.csv with picked_for / picked_prob columns). Point number_plate_detection at that folder for an
+# 8-photo set. Each frame is used for one side at most. CLI: --pick-sides turns it on for one run.
+pick_sides = false
+
+# A side whose best frame has a probability below this (0 to <1) counts as not shown in the video: it is listed
+# in missing_sides.txt and left out, never filled with a weak or repeated frame.
+pick_min_prob = 0.3

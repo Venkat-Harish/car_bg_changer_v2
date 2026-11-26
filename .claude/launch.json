@@ -6,6 +6,12 @@
       "runtimeExecutable": "background_changer/.venv/Scripts/python.exe",
       "runtimeArgs": ["-m", "http.server", "8790", "--bind", "127.0.0.1", "--directory", "background_changer/output/check_room"],
       "port": 8790
+    },
+    {
+      "name": "e2e-report",
+      "runtimeExecutable": "background_changer/.venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "http.server", "8791", "--bind", "127.0.0.1", "--directory", "."],
+      "port": 8791
     }
   ]
 }

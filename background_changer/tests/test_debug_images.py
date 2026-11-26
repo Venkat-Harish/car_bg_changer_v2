@@ -3,12 +3,14 @@
 Run from the background_changer folder:  .venv\\Scripts\\python -m pytest tests
 """
 
+from types import SimpleNamespace
+
 import cv2
 import numpy as np
 
 from bg_changer.segment import clean_alpha
 from car_fit_to_bg.lines import line_camera
-from debug_images import DebugWriter, cutout_pictures
+from debug_images import DebugWriter, cutout_pictures, glass_pictures, hosted_camera_picture
 
 
 def raw_mask():
@@ -42,6 +44,42 @@ def test_no_car_still_gets_the_photo_and_the_model_mask(tmp_path):
     image = np.zeros((120, 160, 3), np.uint8)
     cutout_pictures(DebugWriter(tmp_path), "p", image, np.zeros((120, 160), np.float32), {}, None, "test-model")
     assert sorted(p.name for p in (tmp_path / "p").iterdir()) == ["01_photo.jpg", "02_cutout_model.jpg"]
+
+
+def test_glass_pictures_only_read_and_are_written(tmp_path):
+    rng = np.random.default_rng(1)
+    before = rng.integers(0, 256, (240, 320, 3), dtype=np.uint8)
+    car = np.zeros((240, 320), np.float32)
+    car[80:190, 60:260] = 1.0
+    window = np.zeros((240, 320), bool)
+    window[95:130, 110:200] = True
+    after = before.copy()
+    after[window] = 20
+    copies = [x.copy() for x in (before, after, window, car)]
+    glass_pictures(DebugWriter(tmp_path), "p", before, after, window, car, 14.3)
+    for a, b in zip((before, after, window, car), copies):
+        assert np.array_equal(a, b)
+    for name in ("05a_glass_mask", "05b_glass_tint"):
+        assert cv2.imread(str(tmp_path / "p" / f"{name}.jpg")) is not None, name
+    glass_pictures(DebugWriter(tmp_path / "none"), "p", before, before, None, car)  # glass mask failed: nothing
+    assert not (tmp_path / "none").exists()
+
+
+def test_hosted_camera_picture_with_and_without_a_hosted_camera(tmp_path):
+    from hosted.camera import HostedCamera
+
+    frame = np.random.default_rng(2).integers(0, 256, (240, 320, 3), dtype=np.uint8)
+    alpha = np.zeros((240, 320), np.float32)
+    alpha[100:200, 60:260] = 1.0
+    fit = SimpleNamespace(f=300.0, focal_source="hosted", pose=SimpleNamespace(h=1.4),
+                          cam=SimpleNamespace(roll=0.5, pitch=3.0, source="hosted", flags=["camera-hosted"]))
+    ext = HostedCamera(f_px=300.0, pitch=3.0, roll=0.5, height_m=1.4, rel_yaw_deg=90.0, conf=0.8)
+    keep = frame.copy()
+    hosted_camera_picture(DebugWriter(tmp_path), "a", frame, alpha, ext, fit, {"moge_f": 310.0, "vggt_ok": "yes"})
+    hosted_camera_picture(DebugWriter(tmp_path), "b", frame, alpha, None, fit)
+    assert np.array_equal(frame, keep)
+    for stem in "ab":
+        assert cv2.imread(str(tmp_path / stem / "05c_hosted_camera.jpg")) is not None
 
 
 def test_line_detail_changes_nothing():

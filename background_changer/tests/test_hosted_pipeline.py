@@ -100,3 +100,14 @@ def test_missing_key_stops_with_a_clear_message(tmp_path, monkeypatch):
     monkeypatch.delenv("FAL_KEY", raising=False)
     with pytest.raises(SystemExit, match="FAL_KEY"):
         hp.HostedRun(SETTINGS, tmp_path / "out", tmp_path / "cache", tmp_path / "none.env", ("m", 1, 1), 1)
+
+
+def test_hosted_results_csv_has_the_isolation_columns():
+    """[hosted] isolates with SAM 3 while [car_isolation] is off: its rows carry isolation/isolate_s, so the
+    header must too (a live run lost its results.csv to csv.DictWriter's 'fields not in fieldnames')."""
+    import change_background as cb
+
+    fields = cb.results_fields("room", isolate=False, hosted=True)
+    assert set(cb.ISOLATION_CSV_FIELDS) <= set(fields) and set(cb.HOSTED_CSV_FIELDS) <= set(fields)
+    assert cb.results_fields("flat", isolate=False, hosted=False) == cb.CSV_FIELDS  # flat CSV unchanged
+    assert cb.results_fields("room", isolate=False, hosted=False) == cb.ROOM_CSV_FIELDS
